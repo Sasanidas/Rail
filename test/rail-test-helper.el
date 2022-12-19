@@ -1,4 +1,4 @@
-;;; monroe-test-helper.el --- Test helper for test suites
+;;; rail-test-helper.el --- Test helper for test suites
 
 ;; Copyright © 2022 Fermin MF
 ;;
@@ -26,15 +26,15 @@
 (require 'cl-lib)
 (require 'vc-git)
 
-(defvar monroe-test-helper-buffer "*monroe-test-server*")
+(defvar rail-test-helper-buffer "*rail-test-server*")
 
-(cl-defmacro monroe-test-helper-request-wrapper (&body body)
+(cl-defmacro rail-test-helper-request-wrapper (&body body)
   `(progn
-     (monroe-test-helper-launch-server)
+     (rail-test-helper-launch-server)
      ,@body
-     (monroe-test-helper-shutdown-server)))
+     (rail-test-helper-shutdown-server)))
 
-(defun monroe-test-helper-launch-server ()
+(defun rail-test-helper-launch-server ()
   (let* ((name "python-nrepl")
 	 (url (format "https://gitlab.com/sasanidas/%s.git" name)))
     
@@ -44,23 +44,23 @@
 
     (shell-command (format "cd %s && poetry install" name))
     (start-process-shell-command "nrepl-python-server"
-				 (get-buffer-create monroe-test-helper-buffer)
+				 (get-buffer-create rail-test-helper-buffer)
 				 (format "cd %s && make debug" name))))
 
-(defun monroe-test-helper-shutdown-server ()
+(defun rail-test-helper-shutdown-server ()
   (ignore-errors
-    (kill-process (get-buffer-process monroe-test-helper-buffer))
-    (with-current-buffer monroe-test-helper-buffer
+    (kill-process (get-buffer-process rail-test-helper-buffer))
+    (with-current-buffer rail-test-helper-buffer
       (setq-local kill-buffer-query-functions
 		  (delq 'process-kill-buffer-query-function kill-buffer-query-functions))
       (set-buffer-modified-p nil)
-      (kill-buffer monroe-test-helper-buffer))))
+      (kill-buffer rail-test-helper-buffer))))
 
-(defun monroe-test-helper-debug-info ()
-  (with-current-buffer monroe-test-helper-buffer
+(defun rail-test-helper-debug-info ()
+  (with-current-buffer rail-test-helper-buffer
     (buffer-substring-no-properties (point-min) (point-max))))
 
 
-(provide 'monroe-test-helper)
+(provide 'rail-test-helper)
 
-;;; monroe-test-helper.el ends here
+;;; rail-test-helper.el ends here

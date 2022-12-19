@@ -1,11 +1,14 @@
-;;; monroe.el --- Yet another client for nREPL -*- indent-tabs-mode: nil -*-
+;;; rail.el --- Yet another client for nREPL -*- indent-tabs-mode: nil -*-
 
 ;; Copyright (c) 2014-2018 Sanel Zukan
-;;
+;; Copyright (c) 2022 Fermin MF
+
 ;; Author: Sanel Zukan <sanelz@gmail.com>
-;; URL: http://www.github.com/sanel/monroe
-;; Version: 0.4.0
-;; Keywords: languages, clojure, nrepl, lisp
+
+;; Maintainer: Fermin MF
+;; URL: https://github.com/Sasanidas/Rail
+;; Version: 0.1.0
+;; Keywords: languages, nrepl, lisp
 
 ;; This program is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -24,264 +27,264 @@
 
 ;;; Commentary:
 
-;; Provides yet another elisp client to connect to Clojure nREPL servers.
+;; Provides another elisp client to connect to nREPL servers.
 
 ;;; Installation:
 
 ;; Copy it to your load-path and run with:
-;; M-: (require 'monroe)
+;; M-: (require 'rail)
 
 ;;; Usage:
 
-;; M-x monroe
+;; M-x rail
 
 ;;; Code:
 
 (require 'comint)
 (require 'cl-macs)
 (require 'subr-x)
-(require 'monroe-bencode)
+(require 'rail-bencode)
 
-(defgroup monroe nil
+(defgroup rail nil
   "Interaction with the nREPL Server."
-  :prefix "monroe-"
+  :prefix "rail-"
   :group 'applications)
 
-(defcustom monroe-repl-prompt-format "%s=> "
+(defcustom rail-repl-prompt-format "%s=> "
   "String used for displaying prompt.
 '%s' is used as placeholder for storing current namespace."
   :type 'string
-  :group 'monroe)
+  :group 'rail)
 
-(defcustom monroe-prompt-regexp "^[^> \n]*>+:? *"
-  "Regexp to recognize prompts in Monroe more.
+(defcustom rail-prompt-regexp "^[^> \n]*>+:? *"
+  "Regexp to recognize prompts in Rail more.
 The same regexp is used in `inferior-lisp'."
   :type 'regexp
-  :group 'monroe)
+  :group 'rail)
 
-(defcustom monroe-default-host "localhost:7888"
+(defcustom rail-default-host "localhost:7888"
   "Default location to connect.
 Unless explicitly given location and port.
 Location and port should be delimited with ':'."
   :type 'string
-  :group 'monroe)
+  :group 'rail)
 
-(defcustom monroe-detail-stacktraces nil
-  "If set to true, Monroe will try to get full stacktrace from thrown exception.
+(defcustom rail-detail-stacktraces nil
+  "If set to true, Rail will try to get full stacktrace from thrown exception.
 Otherwise will just behave as standard REPL version."
   :type 'boolean
-  :group 'monroe)
+  :group 'rail)
 
 (define-obsolete-variable-alias
-  'monroe-old-style-stacktraces
-  'monroe-print-stack-trace-function
+  'rail-old-style-stacktraces
+  'rail-print-stack-trace-function
   "0.4.0")
 
-(defcustom monroe-print-stack-trace-function nil
+(defcustom rail-print-stack-trace-function nil
   "Set to a clojure-side function in order to override stack-trace printing.
 
-Will be called upon error when `monroe-detail-stacktraces' is non-nil.
+Will be called upon error when `rail-detail-stacktraces' is non-nil.
 
 e.g. clojure.stacktrace/print-stack-trace for old-style stack traces."
   :type 'symbol
-  :group 'monroe)
+  :group 'rail)
 
-(defvar monroe-version "0.4.0"
-  "The current monroe version.")
+(defvar rail-version "0.1.0"
+  "The current rail version.")
 
-(defvar monroe-session nil
+(defvar rail-session nil
   "Current nREPL session id.")
 
-(defvar monroe-requests (make-hash-table :test 'equal)
+(defvar rail-requests (make-hash-table :test 'equal)
   "Map of requests to be processed.")
 
-(defvar monroe-requests-counter 0
+(defvar rail-requests-counter 0
   "Serial number for message.")
 
-(defvar monroe-nrepl-sync-timeout 5
+(defvar rail-nrepl-sync-timeout 5
   "Number of seconds to wait for a sync response.")
 
-(defvar monroe-custom-handlers (make-hash-table :test 'equal)
+(defvar rail-custom-handlers (make-hash-table :test 'equal)
   "Map of handlers for custom ops.")
 
-(defvar monroe-buffer-ns "user"
+(defvar rail-buffer-ns "user"
   "Current clojure namespace for this buffer.
 This namespace is only advertised until first expression is
 evaluated, then is updated to the one used on nrepl side.")
 
-(defvar monroe-nrepl-server-cmd "lein"
+(defvar rail-nrepl-server-cmd "lein"
   "Command to start nrepl server.
 Defaults to Leiningen")
 
-(defvar monroe-nrepl-server-cmd-args "trampoline repl :headless"
+(defvar rail-nrepl-server-cmd-args "trampoline repl :headless"
   "Arguments to pass to the nrepl command.
 Defaults to: trampoline repl :headless")
 
-(defvar monroe-nrepl-server-buffer-name "monroe nrepl server")
+(defvar rail-nrepl-server-buffer-name "rail nrepl server")
 
-(defvar monroe-nrepl-server-project-file "project.clj")
+(defvar rail-nrepl-server-project-file "project.clj")
 
-(make-variable-buffer-local 'monroe-session)
-(make-variable-buffer-local 'monroe-requests)
-(make-variable-buffer-local 'monroe-requests-counter)
-(make-variable-buffer-local 'monroe-buffer-ns)
+(make-variable-buffer-local 'rail-session)
+(make-variable-buffer-local 'rail-requests)
+(make-variable-buffer-local 'rail-requests-counter)
+(make-variable-buffer-local 'rail-buffer-ns)
 
 ;;; message stuff
 
 ;; Idea for message handling (via callbacks) and destructuring response is shamelessly
 ;; stolen from nrepl.el.
-(defmacro monroe-dbind-response (response keys &rest body)
+(defmacro rail-dbind-response (response keys &rest body)
   "Destructure an nREPL RESPONSE dict.
 Bind the value of the provided KEYS and execute BODY."
   `(let ,(cl-loop for key in keys
                   collect `(,key (plist-get ,response ,(intern (format ":%s" key)))))
      ,@body))
 
-(defun monroe-send-request (request callback)
+(defun rail-send-request (request callback)
   "Send REQUEST and assign CALLBACK.
 The CALLBACK function will be called when reply is received."
-  (let* ((id       (number-to-string (cl-incf monroe-requests-counter)))
+  (let* ((id       (number-to-string (cl-incf rail-requests-counter)))
          (hash (make-hash-table :test 'equal)))
     (puthash "id" id hash)
     (cl-loop for (key . value) in request
              do (puthash key value hash))
 
-    (puthash id callback monroe-requests)
-    (process-send-string (monroe-connection) (monroe-bencode-encode hash))))
+    (puthash id callback rail-requests)
+    (process-send-string (rail-connection) (rail-bencode-encode hash))))
 
-(defun monroe-send-sync-request (request)
+(defun rail-send-sync-request (request)
   "Send request to nREPL server synchronously."
   (let ((time0 (current-time))
         response
         global-status)
-    (monroe-send-request request (lambda (resp) (setq response resp)))
+    (rail-send-request request (lambda (resp) (setq response resp)))
     (while (not (member "done" global-status))
-      (monroe-dbind-response response (status)
+      (rail-dbind-response response (status)
         (setq global-status status))
-      (when (time-less-p monroe-nrepl-sync-timeout
+      (when (time-less-p rail-nrepl-sync-timeout
                          (time-subtract nil time0))
         (error "Sync nREPL request timed out %s" request))
       (accept-process-output nil 0.01))
-    (monroe-dbind-response response (id status)
+    (rail-dbind-response response (id status)
       (when id
-        (remhash id monroe-requests)))
+        (remhash id rail-requests)))
     response))
 
-(defun monroe-clear-request-table ()
+(defun rail-clear-request-table ()
   "Erases current request table."
-  (clrhash monroe-requests)
-  (setq monroe-requests-counter 0))
+  (clrhash rail-requests)
+  (setq rail-requests-counter 0))
 
-(defun monroe-current-session ()
+(defun rail-current-session ()
   "Returns current session id."
-  (with-current-buffer (process-buffer (monroe-connection)) monroe-session))
+  (with-current-buffer (process-buffer (rail-connection)) rail-session))
 
 ;;; nrepl messages we knows about
 
-(defun monroe-send-hello (callback)
+(defun rail-send-hello (callback)
   "Initiate nREPL session."
-  (monroe-send-request '(("op" ."clone")) callback))
+  (rail-send-request '(("op" ."clone")) callback))
 
-(defun monroe-send-describe (callback)
+(defun rail-send-describe (callback)
   "Produce a machine- and human-readable directory and documentation for
 the operations supported by an nREPL endpoint."
-  (monroe-send-request '(("op" . "describe")) callback))
+  (rail-send-request '(("op" . "describe")) callback))
 
-(cl-defun monroe-send-eval-string (str callback &optional ns)
+(cl-defun rail-send-eval-string (str callback &optional ns)
   "Send code for evaluation on given namespace."
   (let ((request `(("op" . "eval")
-                   ("session" . ,(monroe-current-session))
+                   ("session" . ,(rail-current-session))
                    ("code" . ,(substring-no-properties str)))))
     (when ns
       (setf request (append request
                             `(("ns" . ,ns)))))
 
-    (monroe-send-request request callback)))
+    (rail-send-request request callback)))
 
-(defun monroe-send-stdin (str callback)
+(defun rail-send-stdin (str callback)
   "Send stdin value."
-  (monroe-send-request
+  (rail-send-request
    `(("op" . "stdin")
-     ("session" . ,(monroe-current-session))
+     ("session" . ,(rail-current-session))
      ("stdin" . ,(substring-no-properties str)))
    callback))
 
-(defun monroe-send-interrupt (request-id callback)
+(defun rail-send-interrupt (request-id callback)
   "Send interrupt for pending requests."
-  (monroe-send-request
+  (rail-send-request
    `(("op" . "interrupt")
-     ("session" . ,(monroe-current-session))
+     ("session" . ,(rail-current-session))
      ("interrupt-id" . ,request-id))
    callback))
 
 ;;; code
 
-(defun monroe-make-response-handler ()
+(defun rail-make-response-handler ()
   "Returns a function that will be called when event is received."
    (lambda (response)
-     (monroe-dbind-response response (id ns value err out ex root-ex status)
+     (rail-dbind-response response (id ns value err out ex root-ex status)
        (let ((output (concat err out
                              (if value
                                (concat value "\n"))))
-             (process (get-buffer-process (monroe-repl-buffer))))
+             (process (get-buffer-process (rail-repl-buffer))))
          ;; update namespace if needed
-         (if ns (setq monroe-buffer-ns ns))
+         (if ns (setq rail-buffer-ns ns))
          (comint-output-filter process output)
          ;; now handle status
          (when status
-           (when (and monroe-detail-stacktraces (member "eval-error" status))
-             (monroe-get-stacktrace))
+           (when (and rail-detail-stacktraces (member "eval-error" status))
+             (rail-get-stacktrace))
            (when (member "eval-error" status)
              (message root-ex))
            (when (member "interrupted" status)
              (message "Evaluation interrupted."))
            (when (member "need-input" status)
-             (monroe-handle-input))
+             (rail-handle-input))
            (when (member "done" status)
-             (remhash id monroe-requests)))
+             (remhash id rail-requests)))
          ;; show prompt only when no messages are pending
-         (when (hash-table-empty-p monroe-requests)
-           (comint-output-filter process (format monroe-repl-prompt-format monroe-buffer-ns)))))))
+         (when (hash-table-empty-p rail-requests)
+           (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
 
-(defun monroe-input-sender (proc input &optional ns)
+(defun rail-input-sender (proc input &optional ns)
   "Called when user enter data in REPL and when something is received in."
-  (monroe-send-eval-string input (monroe-make-response-handler) ns))
+  (rail-send-eval-string input (rail-make-response-handler) ns))
 
-(defun monroe-handle-input ()
+(defun rail-handle-input ()
   "Called when requested user input."
-  (monroe-send-stdin
+  (rail-send-stdin
    (concat (read-from-minibuffer "Stdin: ") "\n")
-   (monroe-make-response-handler)))
+   (rail-make-response-handler)))
 
-(defun monroe-sentinel (process message)
+(defun rail-sentinel (process message)
   "Called when connection is changed; in out case dropped."
   (message "nREPL connection closed: %s" message)
   (kill-buffer (process-buffer process))
-  (monroe-disconnect))
+  (rail-disconnect))
 
-(defun monroe-dispatch (msg)
+(defun rail-dispatch (msg)
   "Find associated callback for a message by id or by op."
-  (monroe-dbind-response msg (id op)
-    (let ((callback (or (gethash id monroe-requests)
-                        (gethash op monroe-custom-handlers))))
+  (rail-dbind-response msg (id op)
+    (let ((callback (or (gethash id rail-requests)
+                        (gethash op rail-custom-handlers))))
       (when callback
         (funcall callback msg)))))
 
-(defun monroe-net-decode ()
+(defun rail-net-decode ()
   "Decode the data in the current buffer and remove the processed data from the
 buffer if the decode successful."
   (let* ((start   (point-min))
          (end     (point-max))
          (data    (buffer-substring-no-properties
                    start end))
-         (decoded (monroe-bencode-decode data)))
+         (decoded (rail-bencode-decode data)))
     (delete-region start end)
     decoded))
 
-(defun monroe-net-filter (process string)
+(defun rail-net-filter (process string)
   "Called when the new message is received. Process will redirect
 all received output to this function; it will decode it and put in
-monroe-repl-buffer."
+rail-repl-buffer."
   (with-current-buffer (process-buffer process)
     (goto-char (point-max))
     (insert string)
@@ -295,144 +298,144 @@ monroe-repl-buffer."
       (when (eq ?e (aref string (- (length string) 1)))
         (unless (accept-process-output process 0.01)
           (while (> (buffer-size) 1)
-            (monroe-dispatch (monroe-net-decode))))))))
+            (rail-dispatch (rail-net-decode))))))))
 
-(defun monroe-new-session-handler (process)
+(defun rail-new-session-handler (process)
   "Returns callback that is called when new connection is established."
   (lambda (response)
-    (monroe-dbind-response response (id new-session)
+    (rail-dbind-response response (id new-session)
                      (when new-session
                        (message "Connected.")
-                       (setq monroe-session new-session)
-                       (remhash id monroe-requests)))))
+                       (setq rail-session new-session)
+                       (remhash id rail-requests)))))
 
-(defun monroe-valid-host-string (str default)
+(defun rail-valid-host-string (str default)
   "Used for getting valid string for host/port part."
   (if (and str (not (string= "" str)))
     str
     default))
 
-(defun monroe-locate-port-file ()
+(defun rail-locate-port-file ()
   (locate-dominating-file default-directory ".nrepl-port"))
 
-(defun monroe-locate-running-nrepl-host ()
+(defun rail-locate-running-nrepl-host ()
   "Return host of running nREPL server."
-  (let ((dir (monroe-locate-port-file)))
+  (let ((dir (rail-locate-port-file)))
     (when dir
       (with-temp-buffer
         (insert-file-contents (concat dir ".nrepl-port"))
         (concat "localhost:" (buffer-string))))))
 
-(defun monroe-extract-host (buff-name)
-  "Take host from monroe buffers."
+(defun rail-extract-host (buff-name)
+  "Take host from rail buffers."
   (car (last (split-string (substring buff-name 1 -1) " "))))
 
-(defun monroe-repl-buffer ()
-  "Returns right monroe buffer."
-  (or (get-buffer (format "*monroe: %s*" (monroe-locate-running-nrepl-host)))
+(defun rail-repl-buffer ()
+  "Returns right rail buffer."
+  (or (get-buffer (format "*rail: %s*" (rail-locate-running-nrepl-host)))
       (get-buffer
-       (format "*monroe: %s*"
-               (monroe-extract-host (buffer-name (current-buffer)))))))
+       (format "*rail: %s*"
+               (rail-extract-host (buffer-name (current-buffer)))))))
 
-(defun monroe-connection ()
-  "Returns right monroe connection."
-  (or (get-process (concat "monroe/" (monroe-locate-running-nrepl-host)))
+(defun rail-connection ()
+  "Returns right rail connection."
+  (or (get-process (concat "rail/" (rail-locate-running-nrepl-host)))
       (get-process
-       (concat "monroe/"
-               (monroe-extract-host (buffer-name (current-buffer)))))))
+       (concat "rail/"
+               (rail-extract-host (buffer-name (current-buffer)))))))
 
-(defun monroe-strip-protocol (host)
+(defun rail-strip-protocol (host)
   "Check if protocol was given and strip it."
   (let ((host (replace-regexp-in-string "[ \t]" "" host)))
     (if (string-match "^nrepl://" host)
         (substring host 8)
       host)))
 
-(defun monroe-connect (host-and-port)
+(defun rail-connect (host-and-port)
   "Connect to remote endpoint using provided hostname and port."
-  (let* ((hp   (split-string (monroe-strip-protocol host-and-port) ":"))
-         (host (monroe-valid-host-string (car hp) "localhost"))
+  (let* ((hp   (split-string (rail-strip-protocol host-and-port) ":"))
+         (host (rail-valid-host-string (car hp) "localhost"))
          (port (string-to-number
-                (monroe-valid-host-string (cadr hp) "7888")))
-         (name (concat "*monroe-connection: " host-and-port "*")))
-    (when (get-buffer name) (monroe-disconnect))
+                (rail-valid-host-string (cadr hp) "7888")))
+         (name (concat "*rail-connection: " host-and-port "*")))
+    (when (get-buffer name) (rail-disconnect))
     (message "Connecting to nREPL host on '%s:%d'..." host port)
     (let ((process (open-network-stream
-                    (concat "monroe/" host-and-port) name host port)))
-      (set-process-filter process 'monroe-net-filter)
-      (set-process-sentinel process 'monroe-sentinel)
+                    (concat "rail/" host-and-port) name host port)))
+      (set-process-filter process 'rail-net-filter)
+      (set-process-sentinel process 'rail-sentinel)
       (set-process-coding-system process 'utf-8-unix 'utf-8-unix)
-      (monroe-send-hello (monroe-new-session-handler (process-buffer process)))
+      (rail-send-hello (rail-new-session-handler (process-buffer process)))
       process)))
 
-(defun monroe-disconnect ()
+(defun rail-disconnect ()
   "Disconnect from current nrepl connection. Calling this function directly
-will force connection closing, which will as result call '(monroe-sentinel)'."
-  (monroe-clear-request-table)
+will force connection closing, which will as result call '(rail-sentinel)'."
+  (rail-clear-request-table)
   (let ((delete-process-safe (lambda (p)
                                (when (and p (process-live-p p))
                                  (delete-process p))))
-        (proc1 (get-buffer-process (monroe-repl-buffer)))
-        (proc2 (monroe-connection)))
+        (proc1 (get-buffer-process (rail-repl-buffer)))
+        (proc2 (rail-connection)))
     (funcall delete-process-safe proc1)
     (funcall delete-process-safe proc2)))
 
 ;;; keys
 
-(defun monroe-eval-region (start end &optional ns)
+(defun rail-eval-region (start end &optional ns)
   "Evaluate selected region."
   (interactive "r")
-  (monroe-input-sender
-   (get-buffer-process (monroe-repl-buffer))
+  (rail-input-sender
+   (get-buffer-process (rail-repl-buffer))
    (buffer-substring-no-properties start end)
    ns))
 
-(defun monroe-eval-buffer ()
+(defun rail-eval-buffer ()
   "Evaluate the buffer."
   (interactive)
-  (monroe-eval-region (point-min) (point-max)))
+  (rail-eval-region (point-min) (point-max)))
 
-(defun monroe-eval-defun ()
+(defun rail-eval-defun ()
   "Figure out top-level expression and send it to evaluation."
   (interactive)
   (save-excursion
     (end-of-defun)
     (let ((end (point)))
       (beginning-of-defun)
-      (monroe-eval-region (point) end
-                    (substring-no-properties (monroe-get-clojure-ns))))))
+      (rail-eval-region (point) end
+                    (substring-no-properties (rail-get-clojure-ns))))))
 
-(defun monroe-eval-expression-at-point ()
+(defun rail-eval-expression-at-point ()
   "Figure out expression at point and send it for evaluation."
   (interactive)
   (save-excursion
     (let ((end (point)))
       (backward-sexp)
-      (monroe-eval-region (point) end))))
+      (rail-eval-region (point) end))))
 
-(defun monroe-eval-namespace ()
+(defun rail-eval-namespace ()
   "Tries to evaluate Clojure ns form. It does this by matching first
 expression at the beginning of the file and evaluating it. Not something
 that is 100% accurate, but Clojure practice is to keep ns forms always
 at the top of the file."
   (interactive)
-  (when (monroe-get-clojure-ns)
+  (when (rail-get-clojure-ns)
     (save-excursion
       (goto-char (match-beginning 0))
-      (monroe-eval-defun))))
+      (rail-eval-defun))))
 
-(defun monroe-eval-doc (symbol)
+(defun rail-eval-doc (symbol)
   "Internal function to actually ask for symbol documentation via nrepl protocol."
-  (monroe-input-sender
-   (get-buffer-process (monroe-repl-buffer))
+  (rail-input-sender
+   (get-buffer-process (rail-repl-buffer))
    (format "(do (require 'clojure.repl) (clojure.repl/doc %s))" symbol)))
 
-(defvar monroe-translate-path-function 'identity
-  "This function is called on all paths returned by `monroe-jump'.
+(defvar rail-translate-path-function 'identity
+  "This function is called on all paths returned by `rail-jump'.
 You can use it to translate paths if you are running an nrepl server remotely or
 inside a container.")
 
-(defun monroe-jump-find-file (file)
+(defun rail-jump-find-file (file)
   "Internal function to find a file on the disk or inside a jar."
   (if (not (string-match "^jar:file:\\(.+\\)!\\(.+\\)" file))
       (find-file (substring file 5))
@@ -448,36 +451,36 @@ inside a container.")
         (when (not already-open)
           (kill-buffer archive-buffer))))))
 
-(defun monroe-eval-jump (ns var)
+(defun rail-eval-jump (ns var)
   "Internal function to actually ask for var location via nrepl protocol."
-  (monroe-send-request
+  (rail-send-request
    `(("op" . "lookup")
      ("sym" . ,(substring-no-properties var))
      ("ns" . ,ns))
    (lambda (response)
-     (monroe-dbind-response response (id info status)
+     (rail-dbind-response response (id info status)
                       (when (member "done" status)
-                        (remhash id monroe-requests))
+                        (remhash id rail-requests))
                       (when info
-                        (monroe-dbind-response info (file line)
-                                         (monroe-jump-find-file (funcall monroe-translate-path-function file))
+                        (rail-dbind-response info (file line)
+                                         (rail-jump-find-file (funcall rail-translate-path-function file))
                                          (when line
                                            (goto-char (point-min))
                                            (forward-line (1- line)))))))))
 
-(defun monroe-completion-at-point ()
+(defun rail-completion-at-point ()
   "Function to be used for the hook `completion-at-point-functions'."
   (interactive)
   (let* ((bnds (bounds-of-thing-at-point 'symbol))
          (start (car bnds))
          (end (cdr bnds))
-         (ns (or (monroe-get-clojure-ns) monroe-buffer-ns))
+         (ns (or (rail-get-clojure-ns) rail-buffer-ns))
          (sym (or (thing-at-point 'symbol t) ""))
-         (response (monroe-send-sync-request
+         (response (rail-send-sync-request
                     `(("op" . "completions")
                       ("ns" . ,ns)
                       ("prefix" . ,sym)))))
-    (monroe-dbind-response response (completions)
+    (rail-dbind-response response (completions)
                      (when completions
                        (list start end
                              (cl-loop for pcandidate in completions
@@ -486,24 +489,24 @@ inside a container.")
                                        (plist-get pcandidate :candidate)))
                              nil)))))
 
-(defun monroe-get-stacktrace ()
+(defun rail-get-stacktrace ()
   "When error happens, print the stack trace"
-  (let ((pst monroe-print-stack-trace-function))
-    (monroe-send-eval-string
+  (let ((pst rail-print-stack-trace-function))
+    (rail-send-eval-string
      (format "(do (require (symbol (namespace '%s))) (%s *e))" pst pst)
-     (monroe-make-response-handler))))
+     (rail-make-response-handler))))
 
-(defun monroe-get-clojure-ns ()
+(defun rail-get-clojure-ns ()
   "If available, get the correct clojure namespace."
   (and (eq major-mode 'clojure-mode)
        (fboundp 'clojure-find-ns)
        (funcall 'clojure-find-ns)))
 
-(defun monroe-get-directory ()
+(defun rail-get-directory ()
   "Internal function to get project directory."
-  (locate-dominating-file default-directory monroe-nrepl-server-project-file))
+  (locate-dominating-file default-directory rail-nrepl-server-project-file))
 
-(defun monroe-describe (symbol)
+(defun rail-describe (symbol)
   "Ask user about symbol and show symbol documentation if found."
   (interactive
    (list
@@ -514,9 +517,9 @@ inside a container.")
                      (format "%s (default %s): " prompt sym)
                      (concat prompt ": "))))
       (read-string prompt nil nil sym))))
-  (monroe-eval-doc symbol))
+  (rail-eval-doc symbol))
 
-(defun monroe-load-file (path)
+(defun rail-load-file (path)
   "Load file to running process, asking user for alternative path.
 This function, contrary to clojure-mode.el, will not use
 comint-mode for sending files as path can be remote location. For
@@ -527,11 +530,11 @@ remote paths, use absolute path."
       (read-file-name "Load file: " nil nil nil
                       (and n (file-name-nondirectory n))))))
   (let ((full-path (tramp-compat-file-local-name (convert-standard-filename (expand-file-name path)))))
-    (monroe-input-sender
-     (get-buffer-process (monroe-repl-buffer))
+    (rail-input-sender
+     (get-buffer-process (rail-repl-buffer))
      (format "(clojure.core/load-file \"%s\")" full-path))))
 
-(defun monroe-jump (var)
+(defun rail-jump (var)
   "Jump to definition of var at point."
   (interactive
    (list (if (thing-at-point 'symbol)
@@ -540,10 +543,10 @@ remote paths, use absolute path."
   (defvar find-tag-marker-ring) ;; etags.el
   (require 'etags)
   (ring-insert find-tag-marker-ring (point-marker))
-  (monroe-eval-jump (monroe-get-clojure-ns) var))
+  (rail-eval-jump (rail-get-clojure-ns) var))
 
-(defun monroe-jump-pop ()
-  "Return point to the position and buffer before running `monroe-jump'."
+(defun rail-jump-pop ()
+  "Return point to the position and buffer before running `rail-jump'."
   (interactive)
   (defvar find-tag-marker-ring) ;; etags.el
   (require 'etags)
@@ -551,118 +554,118 @@ remote paths, use absolute path."
     (switch-to-buffer (marker-buffer marker))
     (goto-char (marker-position marker))))
 
-(defun monroe-switch-to-repl ()
+(defun rail-switch-to-repl ()
   (interactive)
-  (pop-to-buffer (monroe-repl-buffer)))
+  (pop-to-buffer (rail-repl-buffer)))
 
-(defun monroe-nrepl-server-start ()
-  "Starts nrepl server. Uses monroe-nrepl-server-cmd +
-monroe-nrepl-server-cmd-args as the command. Finds project root
-by locatin monroe-nrepl-server-project-file"
+(defun rail-nrepl-server-start ()
+  "Starts nrepl server. Uses rail-nrepl-server-cmd +
+rail-nrepl-server-cmd-args as the command. Finds project root
+by locatin rail-nrepl-server-project-file"
   (interactive)
-  (let* ((nrepl-buf-name (concat "*" monroe-nrepl-server-buffer-name "*"))
-         (repl-started-dir (monroe-locate-port-file)))
+  (let* ((nrepl-buf-name (concat "*" rail-nrepl-server-buffer-name "*"))
+         (repl-started-dir (rail-locate-port-file)))
     (if repl-started-dir
         (message "nREPL server already running in %s" repl-started-dir)
       (progn
-        (message "Starting nREPL server in %s" (monroe-get-directory))
-        (async-shell-command (concat monroe-nrepl-server-cmd " " monroe-nrepl-server-cmd-args)
+        (message "Starting nREPL server in %s" (rail-get-directory))
+        (async-shell-command (concat rail-nrepl-server-cmd " " rail-nrepl-server-cmd-args)
                              nrepl-buf-name)))))
 
-(defun monroe-extract-keys (htable)
+(defun rail-extract-keys (htable)
   "Get all keys from hashtable."
   (let (keys)
     (maphash (lambda (k v) (setq keys (cons k keys))) htable)
     keys))
 
-(defun monroe-interrupt ()
+(defun rail-interrupt ()
   "Send interrupt to all pending requests."
   (interactive)
-  (dolist (id (monroe-extract-keys monroe-requests))
-    (monroe-send-interrupt id (monroe-make-response-handler))))
+  (dolist (id (rail-extract-keys rail-requests))
+    (rail-send-interrupt id (rail-make-response-handler))))
 
-;; keys for interacting with Monroe REPL buffer
-(defvar monroe-interaction-mode-map
+;; keys for interacting with Rail REPL buffer
+(defvar rail-interaction-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\C-c\C-c" 'monroe-eval-defun)
-    (define-key map "\C-c\C-e" 'monroe-eval-expression-at-point)
-    (define-key map "\C-c\C-r" 'monroe-eval-region)
-    (define-key map "\C-c\C-k" 'monroe-eval-buffer)
-    (define-key map "\C-c\C-n" 'monroe-eval-namespace)
-    (define-key map "\C-c\C-d" 'monroe-describe)
-    (define-key map "\C-c\C-b" 'monroe-interrupt)
-    (define-key map "\C-c\C-l" 'monroe-load-file)
-    (define-key map "\M-."     'monroe-jump)
-    (define-key map "\M-,"     'monroe-jump-pop)
-    (define-key map "\C-c\C-z" 'monroe-switch-to-repl)
+    (define-key map "\C-c\C-c" 'rail-eval-defun)
+    (define-key map "\C-c\C-e" 'rail-eval-expression-at-point)
+    (define-key map "\C-c\C-r" 'rail-eval-region)
+    (define-key map "\C-c\C-k" 'rail-eval-buffer)
+    (define-key map "\C-c\C-n" 'rail-eval-namespace)
+    (define-key map "\C-c\C-d" 'rail-describe)
+    (define-key map "\C-c\C-b" 'rail-interrupt)
+    (define-key map "\C-c\C-l" 'rail-load-file)
+    (define-key map "\M-."     'rail-jump)
+    (define-key map "\M-,"     'rail-jump-pop)
+    (define-key map "\C-c\C-z" 'rail-switch-to-repl)
     map))
 
-;; keys for interacting inside Monroe REPL buffer
-(defvar monroe-mode-map
+;; keys for interacting inside Rail REPL buffer
+(defvar rail-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map comint-mode-map)
-    (define-key map "\C-c\C-d" 'monroe-describe)
-    (define-key map "\C-c\C-c" 'monroe-interrupt)
-    (define-key map "\M-."     'monroe-jump)
+    (define-key map "\C-c\C-d" 'rail-describe)
+    (define-key map "\C-c\C-c" 'rail-interrupt)
+    (define-key map "\M-."     'rail-jump)
     map))
 
 ;;; rest
 
-(define-derived-mode monroe-mode comint-mode "Monroe nREPL"
+(define-derived-mode rail-mode comint-mode "Rail nREPL"
   "Major mode for evaluating commands over nREPL.
 
-The following keys are available in `monroe-mode':
+The following keys are available in `rail-mode':
 
-  \\{monroe-mode-map}"
+  \\{rail-mode-map}"
 
   :syntax-table lisp-mode-syntax-table
-  (setq-local comint-prompt-regexp monroe-prompt-regexp
-              comint-input-sender 'monroe-input-sender
+  (setq-local comint-prompt-regexp rail-prompt-regexp
+              comint-input-sender 'rail-input-sender
               comint-prompt-read-only t
               mode-line-process '(":%s"))
-  (add-hook 'completion-at-point-functions #'monroe-completion-at-point nil 'local)
+  (add-hook 'completion-at-point-functions #'rail-completion-at-point nil 'local)
 
   ;; a hack to keep comint happy
   (unless (comint-check-proc (current-buffer))
-    (let ((fake-proc (start-process "monroe" (current-buffer) nil)))
+    (let ((fake-proc (start-process "rail" (current-buffer) nil)))
       (set-process-query-on-exit-flag fake-proc nil)
-      (insert (format ";; Monroe nREPL %s\n" monroe-version))
+      (insert (format ";; Rail nREPL %s\n" rail-version))
       (set-marker (process-mark fake-proc) (point))
-      (comint-output-filter fake-proc (format monroe-repl-prompt-format monroe-buffer-ns)))))
+      (comint-output-filter fake-proc (format rail-repl-prompt-format rail-buffer-ns)))))
 
 ;;; user command
 
-(defun clojure-enable-monroe ()
-  (monroe-interaction-mode t))
+(defun clojure-enable-rail ()
+  (rail-interaction-mode t))
 
 ;;;###autoload
-(define-minor-mode monroe-interaction-mode
-  "Minor mode for Monroe interaction from a Clojure buffer.
+(define-minor-mode rail-interaction-mode
+  "Minor mode for Rail interaction from a Clojure buffer.
 
-The following keys are available in `monroe-interaction-mode`:
+The following keys are available in `rail-interaction-mode`:
 
-  \\{monroe-interaction-mode}"
+  \\{rail-interaction-mode}"
 
-  :init-value nil :lighter " Monroe" :keymap monroe-interaction-mode-map)
+  :init-value nil :lighter " Rail" :keymap rail-interaction-mode-map)
 
 ;;;###autoload
-(defun monroe (host-and-port)
-  "Load monroe by setting up appropriate mode, asking user for
+(defun rail (host-and-port)
+  "Load rail by setting up appropriate mode, asking user for
 connection endpoint."
   (interactive
-   (let ((host (or (monroe-locate-running-nrepl-host) monroe-default-host)))
+   (let ((host (or (rail-locate-running-nrepl-host) rail-default-host)))
      (list
       (read-string (format "Host (default '%s'): " host)
                    nil nil host))))
   (unless (ignore-errors
             (with-current-buffer
-                (get-buffer-create (concat "*monroe: " host-and-port "*"))
+                (get-buffer-create (concat "*rail: " host-and-port "*"))
               (prog1
-                  (monroe-connect host-and-port)
+                  (rail-connect host-and-port)
                 (goto-char (point-max))
-                (monroe-mode)
+                (rail-mode)
                 (switch-to-buffer (current-buffer)))))
     (message "Unable to connect to %s" host-and-port)))
-(provide 'monroe)
+(provide 'rail)
 
-;;; monroe.el ends here
+;;; rail.el ends here

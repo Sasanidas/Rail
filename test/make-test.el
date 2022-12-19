@@ -1,5 +1,5 @@
-(let* ((project-files-list '("monroe-test-helper.el"
-			     "monroe-test.el"))
+(let* ((project-files-list '("rail-test-helper.el"
+			     "rail-test.el"))
        (current-directory (file-name-directory load-file-name))
        (project-test-path (expand-file-name "." current-directory))
        (project-root-path (expand-file-name ".." current-directory)))

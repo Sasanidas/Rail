@@ -1,4 +1,4 @@
-;;; monroe-utils-tests.el ---
+;;; rail-utils-tests.el ---
 
 ;; Copyright © 2022 Fermin MF
 ;;
@@ -24,17 +24,17 @@
 ;;; Code:
 
 (require 'ert)
-(require 'monroe)
-(require 'monroe-test-helper)
+(require 'rail)
+(require 'rail-test-helper)
 
 
 (ert-deftest test-sync-hello ()
-  (unless (get-buffer monroe-test-helper-buffer)
-    (monroe-test-helper-launch-server))
+  (unless (get-buffer rail-test-helper-buffer)
+    (rail-test-helper-launch-server))
   (should (string= ""
 		   (progn
-		     (monroe "localhost:7888")
+		     (rail "localhost:7888")
 		     (sit-for 0.3)
-		     (with-current-buffer (get-buffer-create monroe-test-helper-buffer)
-		       (monroe-send-sync-request `(("op" ."clone")))))))
+		     (with-current-buffer (get-buffer-create rail-test-helper-buffer)
+		       (rail-send-sync-request `(("op" ."clone")))))))
   )
