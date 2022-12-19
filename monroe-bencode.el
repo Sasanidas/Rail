@@ -10,7 +10,7 @@
 ;; This file is based on https://github.com/skeeto/emacs-bencode
 
 
-;; This package provides a strict and robust [monroe-bencode][monroe-bencode]
+;; This package provides a strict and robust [bencode][bencode]
 ;; encoder and decoder.Encoding is precise, taking into account
 ;; character encoding issues.As such, the encoder always returns
 ;; unibyte data intended to be written out as raw binary data without

@@ -1,32 +1,45 @@
-# monroe.el --- Yet another client for nREPL
-#
-# Copyright (c) 2014-2018 Sanel Zukan
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+EMACS=emacs
 
-.PHONY: clean compile
+.PHONY: help package elpa clean make-test compile-test test lint
 
-EMACS  ?= emacs
-FILES  ?= monroe.el
-STRICT ?= --eval '(setq byte-compile-error-on-warn t)'
+help:
+	@printf "\
+Main targets\n\
+compile    -- compile .el files\n\
+elpa 	   -- create a package with the elpa format \n\
+package    -- create a tar.gz file with the .el files \n\
+test       -- run tests in batch mode\n\
+clean      -- delete generated files\n\
+lint       -- run package-lint in batch mode\n\
+help       -- print this message\n"
 
-%.elc:%.el
-	$(EMACS) --batch -Q -L . $(STRICT) -f batch-byte-compile $<
+package: *.el
+	@ver=`grep -o "Version: .*" monroe.el | cut -c 10-`; \
+	tar czvf monroe-$$ver.tar.gz --mode 644 $$(find . -name \*.el)
 
-compile: $(FILES:.el=.elc)
-
-all: compile
+elpa: *.el
+	@version=`grep -o "Version: .*" monroe.el | cut -c 10-`; \
+	dir=monroe-$$version; \
+	mkdir -p "$$dir"; \
+	cp $$(find . -name \*.el) monroe-$$version; \
+	echo "(define-package \"monroe\" \"$$version\" \
+	\"Modular in-buffer completion framework\")" \
+	> "$$dir"/monroe-pkg.el; \
+	tar cvf monroe-$$version.tar --mode 644 "$$dir"
 
 clean:
-	$(RM) *.elc
+	@rm -rf *.elc ert.el .elpa/ $$(find . -print | grep -i ".elc")
+
+make-test:
+	${EMACS}  --batch -l test/make-install.el -l test/make-test.el 
+
+
+test: make-test clean
+
+compile:
+	${EMACS} --batch -l test/make-install.el -L . -f batch-byte-compile monroe.el $$(find . -print | grep -i "monroe-")
+
+compile-test: compile clean
+
+lint:
+	${EMACS} --batch -l test/make-install.el -f package-lint-batch-and-exit $$(find . -print | grep -i "monroe-")
