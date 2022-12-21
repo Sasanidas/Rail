@@ -679,7 +679,7 @@ connection endpoint."
                   (rail-connect host-and-port)
                 (goto-char (point-max))
                 (rail-mode)
-                (switch-to-buffer (current-buffer)))))
+                (pop-to-buffer (current-buffer)))))
     (message "Unable to connect to %s" host-and-port)))
 (provide 'rail)
 
