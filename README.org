@@ -1,4 +1,6 @@
 * Rail - Generic nREPL client for Emacs
+[[https://img.shields.io/badge/license-GPL_3-green.svg]] 
+[[https://github.com/Sasanidas/Rail/actions/workflows/main.yml/badge.svg]]
 
 Rail is an client [[https://github.com/nrepl/nrepl][nREPL]] implementation base on [[https://github.com/sanel/monroe][monroe]], with similar features
 but more aims to be a more complete implementation.
