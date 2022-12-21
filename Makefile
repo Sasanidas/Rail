@@ -14,18 +14,18 @@ lint       -- run package-lint in batch mode\n\
 help       -- print this message\n"
 
 package: *.el
-	@ver=`grep -o "Version: .*" monroe.el | cut -c 10-`; \
-	tar czvf monroe-$$ver.tar.gz --mode 644 $$(find . -name \*.el)
+	@ver=`grep -o "Version: .*" rail.el | cut -c 10-`; \
+	tar czvf rail-$$ver.tar.gz --mode 644 $$(find . -name \*.el)
 
 elpa: *.el
-	@version=`grep -o "Version: .*" monroe.el | cut -c 10-`; \
-	dir=monroe-$$version; \
+	@version=`grep -o "Version: .*" rail.el | cut -c 10-`; \
+	dir=rail-$$version; \
 	mkdir -p "$$dir"; \
-	cp $$(find . -name \*.el) monroe-$$version; \
-	echo "(define-package \"monroe\" \"$$version\" \
+	cp $$(find . -name \*.el) rail-$$version; \
+	echo "(define-package \"rail\" \"$$version\" \
 	\"Modular in-buffer completion framework\")" \
-	> "$$dir"/monroe-pkg.el; \
-	tar cvf monroe-$$version.tar --mode 644 "$$dir"
+	> "$$dir"/rail-pkg.el; \
+	tar cvf rail-$$version.tar --mode 644 "$$dir"
 
 clean:
 	@rm -rf *.elc ert.el .elpa/ $$(find . -print | grep -i ".elc")
@@ -37,9 +37,9 @@ make-test:
 test: make-test clean
 
 compile:
-	${EMACS} --batch -l test/make-install.el -L . -f batch-byte-compile monroe.el $$(find . -print | grep -i "monroe-")
+	${EMACS} --batch -l test/make-install.el -L . -f batch-byte-compile rail.el $$(find . -print | grep -i "rail-")
 
 compile-test: compile clean
 
 lint:
-	${EMACS} --batch -l test/make-install.el -f package-lint-batch-and-exit $$(find . -print | grep -i "monroe-")
+	${EMACS} --batch -l test/make-install.el -f package-lint-batch-and-exit $$(find . -print | grep -i "rail-")
