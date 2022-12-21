@@ -41,7 +41,7 @@
 ;;; Code:
 
 (require 'comint)
-(require 'cl-macs)
+(require 'cl-lib)
 (require 'subr-x)
 (require 'rail-bencode)
 
@@ -97,6 +97,9 @@ e.g. clojure.stacktrace/print-stack-trace for old-style stack traces."
 
 (defvar rail-requests (make-hash-table :test 'equal)
   "Map of requests to be processed.")
+
+(defvar rail-process nil
+  "Current NREPL process.")
 
 (defvar rail-requests-counter 0
   "Serial number for message.")
@@ -363,22 +366,37 @@ rail-repl-buffer."
         (substring host 8)
       host)))
 
-(defun rail-connect (host-and-port)
+(cl-defun rail-valid-connection-p (host-and-port)
+  "Validate that HOST-AND-PORT are valid for a connection."
+  (condition-case nil
+      (cl-destructuring-bind (host port)
+          (split-string (rail-strip-protocol host-and-port) ":")
+        (and (not (string= "" host))
+             (not (string= "" port))
+             (cons host (string-to-number port))))
+    (error nil)))
+
+
+;;(when (get-buffer name) (rail-disconnect))
+
+(cl-defun rail-connect (&key (host-and-port rail-default-host))
   "Connect to remote endpoint using provided hostname and port."
-  (let* ((hp   (split-string (rail-strip-protocol host-and-port) ":"))
-         (host (rail-valid-host-string (car hp) "localhost"))
-         (port (string-to-number
-                (rail-valid-host-string (cadr hp) "7888")))
-         (name (concat "*rail-connection: " host-and-port "*")))
-    (when (get-buffer name) (rail-disconnect))
-    (message "Connecting to nREPL host on '%s:%d'..." host port)
-    (let ((process (open-network-stream
-                    (concat "rail/" host-and-port) name host port)))
-      (set-process-filter process 'rail-net-filter)
-      (set-process-sentinel process 'rail-sentinel)
-      (set-process-coding-system process 'utf-8-unix 'utf-8-unix)
-      (rail-send-hello (rail-new-session-handler (process-buffer process)))
-      process)))
+  (let* ((name (concat "*rail-connection: " host-and-port "*"))
+         (valid-connection (rail-valid-connection-p host-and-port))
+         process)
+    (if valid-connection
+        (cl-destructuring-bind (host . port ) valid-connection
+          (message "Connecting to nREPL host on '%s:%d'..." host port)
+          (setf process (open-network-stream
+                         (concat "rail/" host-and-port) name host port))
+
+          (set-process-filter process 'rail-net-filter)
+          (set-process-sentinel process 'rail-sentinel)
+          (set-process-coding-system process 'utf-8-unix 'utf-8-unix)
+
+          (rail-send-hello (rail-new-session-handler (process-buffer process)))
+          process)
+      (error "Connection with %s not possible" host-and-port))))
 
 (defun rail-disconnect ()
   "Disconnect from current nrepl connection. Calling this function directly
@@ -587,17 +605,11 @@ by locatin rail-nrepl-server-project-file"
         (async-shell-command (concat rail-nrepl-server-cmd " " rail-nrepl-server-cmd-args)
                              nrepl-buf-name)))))
 
-(defun rail-extract-keys (htable)
-  "Get all keys from hashtable."
-  (let (keys)
-    (maphash (lambda (k v) (setq keys (cons k keys))) htable)
-    keys))
-
 (defun rail-interrupt ()
   "Send interrupt to all pending requests."
   (interactive)
-  (dolist (id (rail-extract-keys rail-requests))
-    (rail-send-interrupt id (rail-make-response-handler))))
+  (cl-loop for id being the hash-key of rail-requests
+           do (rail-send-interrupt id (rail-make-response-handler))))
 
 ;; keys for interacting with Rail REPL buffer
 (defvar rail-interaction-mode-map
@@ -638,7 +650,7 @@ The following keys are available in `rail-mode':
               comint-input-sender 'rail-input-sender
               comint-prompt-read-only t
               mode-line-process '(":%s"))
-  (add-hook 'completion-at-point-functions #'rail-completion-at-point nil 'local)
+  (add-hook 'completion-at-point-functions #'rail-completion-at-point nil t)
 
   ;; a hack to keep comint happy
   (unless (comint-check-proc (current-buffer))
@@ -650,12 +662,9 @@ The following keys are available in `rail-mode':
 
 ;;; user command
 
-(defun clojure-enable-rail ()
-  (rail-interaction-mode t))
-
 ;;;###autoload
 (define-minor-mode rail-interaction-mode
-  "Minor mode for Rail interaction from a Clojure buffer.
+  "Minor mode for Rail interaction from a buffer.
 
 The following keys are available in `rail-interaction-mode`:
 
@@ -672,14 +681,17 @@ connection endpoint."
      (list
       (read-string (format "Host (default '%s'): " host)
                    nil nil host))))
-  (unless (ignore-errors
-            (with-current-buffer
-                (get-buffer-create (concat "*rail: " host-and-port "*"))
-              (prog1
-                  (rail-connect host-and-port)
-                (goto-char (point-max))
-                (rail-mode)
-                (pop-to-buffer (current-buffer)))))
+
+  (unless
+      (with-current-buffer
+          (get-buffer-create (concat "*rail: " host-and-port "*"))
+        (when-let ((connection (rail-connect :host-and-port host-and-port)))
+          (setf rail-process connection)
+          (goto-char (point-max))
+          (rail-mode)
+          (when (called-interactively-p 'interactive)
+            (pop-to-buffer (current-buffer)))))
+
     (message "Unable to connect to %s" host-and-port)))
 (provide 'rail)
 

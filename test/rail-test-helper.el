@@ -31,6 +31,18 @@
 (cl-defmacro rail-test-helper-request-wrapper (&body body)
   `(progn
      (rail-test-helper-launch-server)
+     (let ((count 0)
+	   (max 20))
+
+       (while (not (condition-case nil
+		       (rail "localhost:7888")
+		     (error nil)))
+	 (if (= count max)
+	     (error "Maximum attempt limit reached"))
+	 (sit-for 0.5)
+	 (setf count (+ count 1))))
+     
+
      ,@body
      (rail-test-helper-shutdown-server)))
 
@@ -43,6 +55,7 @@
       (vc-git-clone url name nil))
 
     (shell-command (format "cd %s && poetry install" name))
+    (message "Starting NREPL python-server...")
     (start-process-shell-command "nrepl-python-server"
 				 (get-buffer-create rail-test-helper-buffer)
 				 (format "cd %s && make debug" name))))

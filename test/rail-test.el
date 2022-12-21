@@ -24,17 +24,29 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
+
 (require 'rail)
 (require 'rail-test-helper)
 
 
-(ert-deftest test-sync-hello ()
-  (unless (get-buffer rail-test-helper-buffer)
-    (rail-test-helper-launch-server))
-  (should (string= ""
-		   (progn
-		     (rail "localhost:7888")
-		     (sit-for 0.3)
-		     (with-current-buffer (get-buffer-create rail-test-helper-buffer)
-		       (rail-send-sync-request `(("op" ."clone")))))))
-  )
+(ert-deftest test-python-sync-describe ()
+  (rail-test-helper-request-wrapper
+   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
+       (should (string= "done" (car (cl-getf describe :status ))))
+       (should (equal '("clone" "describe" "eval" "complete" "ls-sessions" "load-file")
+		      (cl-getf (cl-getf describe :server-capabilities)
+			       :ops)))))))
+
+;; (cl-getf '(:status ("done")
+;; 		   :time-stamp "2022-12-19 12:19:48.979450" :server-capabilities
+;; 		   (:ops
+;; 		    ("clone" "describe" "eval" "complete")
+;; 		    :ns
+;; 		    ("user"))
+;; 		   :id "1" "started" "2022-12-19 12:19:48.978601")
+;; 	 :status
+;; 	 )
+
+;; (equal '("clone" "describe" "eval" "complete") '("clone" "describe" "eval" "complete"))
