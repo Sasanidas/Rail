@@ -28,12 +28,10 @@
 
 (defvar rail-test-helper-buffer "*rail-test-server*")
 
-(cl-defmacro rail-test-helper-request-wrapper (&body body)
+(cl-defmacro rail-test-helper-request-wrapper (type &body body)
   `(progn
-     (rail-test-helper-launch-server)
-     (let ((count 0)
-	   (max 20))
-
+     (rail-test-helper-launch-server ,type)
+     (let ((count 0) (max 20))
        (while (not (condition-case nil
 		       (rail "localhost:7888")
 		     (error nil)))
@@ -41,12 +39,11 @@
 	     (error "Maximum attempt limit reached"))
 	 (sit-for 0.5)
 	 (setf count (+ count 1))))
-     
 
      ,@body
      (rail-test-helper-shutdown-server)))
 
-(defun rail-test-helper-launch-server ()
+(cl-defmethod rail-test-helper-launch-server ((type (eql :python)))
   (let* ((name "python-nrepl")
 	 (url (format "https://gitlab.com/sasanidas/%s.git" name)))
     
@@ -55,11 +52,20 @@
       (vc-git-clone url name nil))
 
     (shell-command (format "cd %s && poetry install" name))
-    (message "Starting NREPL python-server...")
+    (message "Starting NREPL python-server ...")
     (start-process-shell-command "nrepl-python-server"
 				 (get-buffer-create rail-test-helper-buffer)
 				 (format "cd %s && make debug" name))))
+(cl-defmethod rail-test-helper-launch-server ((type (eql :lein)))
+  (let* ((path (or
+		(and (file-directory-p "dummy_clojure")
+		     "dummy_clojure")
+		"test/dummy_clojure")))
 
+    (message "Starting NREPL lein ...")
+    (start-process-shell-command "nrepl-lein-server"
+				 (get-buffer-create rail-test-helper-buffer)
+				 (format "cd %s && lein trampoline repl :headless :host 127.0.0.1 :port 7888" path))))
 (defun rail-test-helper-shutdown-server ()
   (ignore-errors
     (kill-process (get-buffer-process rail-test-helper-buffer))

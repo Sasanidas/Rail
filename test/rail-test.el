@@ -30,14 +30,35 @@
 (require 'rail-test-helper)
 
 
+(cl-defmethod rail-test-describe ((type (eql :python)))
+  (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (let ((describe (rail-send-sync-request '(("op" . "describe")))))
+      (should (string= "done" (car (cl-getf describe :status ))))
+      (should (equal '("clone" "describe" "eval" "complete" "ls-sessions" "load-file")
+		     (cl-getf (cl-getf describe :server-capabilities)
+			      :ops))))))
+
+(cl-defmethod rail-test-describe ((type (eql :lein)))
+  (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (let ((describe (rail-send-sync-request '(("op" . "describe")))))
+      (should (string= "done" (car (cl-getf describe :status ))))
+      (should (equal '(:clone :close
+			      :describe :eval
+			      :interrupt :load-file
+			      :ls-sessions :stdin)
+		     (delete nil
+			     (cl-getf (cddr describe) :ops)))))))
+
 (ert-deftest test-python-sync-describe ()
   (rail-test-helper-request-wrapper
-   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
-     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
-       (should (string= "done" (car (cl-getf describe :status ))))
-       (should (equal '("clone" "describe" "eval" "complete" "ls-sessions" "load-file")
-		      (cl-getf (cl-getf describe :server-capabilities)
-			       :ops)))))))
+   :python (rail-test-describe :python)))
+
+(ert-deftest test-lein-sync-describe ()
+  (rail-test-helper-request-wrapper
+   :lein (rail-test-describe :lein)))
+
+
+
 
 ;; (cl-getf '(:status ("done")
 ;; 		   :time-stamp "2022-12-19 12:19:48.979450" :server-capabilities
