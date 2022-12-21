@@ -1,0 +1,53 @@
+* Rail - Generic nREPL client for Emacs
+
+Rail is an client [[https://github.com/nrepl/nrepl][nREPL]] implementation base on [[https://github.com/sanel/monroe][monroe]], with similar features
+but more aims to be a more complete implementation.
+
+If you want the simpler version, monroe is the way to go.
+
+Rail main goal is to implement a client that is not bound in any way to Clojure,
+following the [[https://nrepl.org/nrepl/1.0/ops.html][supported operations]], which are language agnostic.
+
+This doesn't mean that it cannot be used in Clojure, the projects understand
+that the "default" language is and probably will be Clojure, so if no language is
+specify, some Clojureto specific assumtions will be made (but I'll try to keep these at minimun).
+
+** Installation
+
+*** Manual
+Rail doesn't have any external depency, son if you are using Emacs 26.2+ you should be good to go,
+just add the files of the project to the [[https://www.emacswiki.org/emacs/LoadPath][load-path]] and require the package:
+#+BEGIN_SRC emacs-lisp
+  (require 'rail)
+#+END_SRC
+
+
+** Usage
+To start a nREPL session, make sure to have a server properly initialize and then use ~M-x rail~ and
+write the ip and port (eg: "localhost:8983")
+
+A REPL will then be pop in the side and you can start typing.
+
+
+** Supported operations
++ clone
++ describe
++ interrupt
++ ls-sessions
++ eval
++ load-file
++ completions
++ lookup
+
+ One of the major features TODO is the support for middlewares, for more information on the
+ operations [[https://nrepl.org/nrepl/1.0/ops.html][here]].
+
+
+** Documentation
+For now, the project has no official documentation, you can check the test repository on how
+the tests are been launch using the server [[https://gitlab.com/sasanidas/python-nrepl][nrepl-python]] (lein will also be added).
+
+
+** Bug reports & patches
+
+Feel free to report any issues you find or you have suggestions for improvements.
