@@ -190,6 +190,18 @@ The CALLBACK function will be called when reply is received."
 the operations supported by an nREPL endpoint."
   (rail-send-request '(("op" . "describe")) callback))
 
+(defun rail-send-load-file (file-name file-content callback)
+  "Produce a machine- and human-readable directory and documentation for
+the operations supported by an nREPL endpoint."
+  (rail-send-request `(("op" . "load-file")
+                   ("file" . ,file-content)
+                   ("file-name" . ,file-name))
+                 callback))
+
+(defun rail-send-ls-sessions (callback)
+  "Get a list of all the sessions currently running in the server."
+  (rail-send-request '(("op" . "ls-sessions")) callback))
+
 (cl-defun rail-send-eval-string (str callback &optional ns)
   "Send code for evaluation on given namespace."
   (let ((request `(("op" . "eval")
@@ -221,30 +233,30 @@ the operations supported by an nREPL endpoint."
 
 (defun rail-make-response-handler ()
   "Returns a function that will be called when event is received."
-   (lambda (response)
-     (rail-dbind-response response (id ns value err out ex root-ex status)
-       (let ((output (concat err out
-                             (if value
-                               (concat value "\n"))))
-             (process (get-buffer-process (rail-repl-buffer))))
-         ;; update namespace if needed
-         (if ns (setq rail-buffer-ns ns))
-         (comint-output-filter process output)
-         ;; now handle status
-         (when status
-           (when (and rail-detail-stacktraces (member "eval-error" status))
-             (rail-get-stacktrace))
-           (when (member "eval-error" status)
-             (message root-ex))
-           (when (member "interrupted" status)
-             (message "Evaluation interrupted."))
-           (when (member "need-input" status)
-             (rail-handle-input))
-           (when (member "done" status)
-             (remhash id rail-requests)))
-         ;; show prompt only when no messages are pending
-         (when (hash-table-empty-p rail-requests)
-           (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
+  (lambda (response)
+    (rail-dbind-response response (id ns value err out ex root-ex status)
+                     (let ((output (concat err out
+                                           (if value
+                                               (concat value "\n"))))
+                           (process (get-buffer-process (rail-repl-buffer))))
+                       ;; update namespace if needed
+                       (if ns (setq rail-buffer-ns ns))
+                       (comint-output-filter process output)
+                       ;; now handle status
+                       (when status
+                         (when (and rail-detail-stacktraces (member "eval-error" status))
+                           (rail-get-stacktrace))
+                         (when (member "eval-error" status)
+                           (message root-ex))
+                         (when (member "interrupted" status)
+                           (message "Evaluation interrupted."))
+                         (when (member "need-input" status)
+                           (rail-handle-input))
+                         (when (member "done" status)
+                           (remhash id rail-requests)))
+                       ;; show prompt only when no messages are pending
+                       (when (hash-table-empty-p rail-requests)
+                         (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
 
 (defun rail-input-sender (proc input &optional ns)
   "Called when user enter data in REPL and when something is received in."
@@ -520,19 +532,22 @@ inside a container.")
   (rail-eval-doc symbol))
 
 (defun rail-load-file (path)
-  "Load file to running process, asking user for alternative path.
-This function, contrary to clojure-mode.el, will not use
-comint-mode for sending files as path can be remote location. For
-remote paths, use absolute path."
-  (interactive
-   (list
-    (let ((n (buffer-file-name)))
-      (read-file-name "Load file: " nil nil nil
-                      (and n (file-name-nondirectory n))))))
-  (let ((full-path (tramp-compat-file-local-name (convert-standard-filename (expand-file-name path)))))
-    (rail-input-sender
-     (get-buffer-process (rail-repl-buffer))
-     (format "(clojure.core/load-file \"%s\")" full-path))))
+  ""
+  (interactive "f")
+  (let* ((buffer (find-file-noselect path))
+         (file-content (with-current-buffer buffer
+                         (buffer-substring-no-properties
+                          (point-min) (point-max)))))
+    (rail-send-load-file
+     (buffer-file-name buffer)
+     file-content
+     (lambda (response)
+       (rail-dbind-response response (id ex root-ex status)
+                        (let ((process (get-buffer-process (rail-repl-buffer))))
+                          ;; now handle status
+                          (when (member "done" status)
+                            (remhash id rail-requests))))
+       (message "File loaded!")))))
 
 (defun rail-jump (var)
   "Jump to definition of var at point."
