@@ -49,13 +49,14 @@
     
     (message "Downloading %s..." name)
     (unless (directory-empty-p name)
-      (vc-git-clone url name nil))
+      (shell-command (format "git clone %s" url)))
 
     (shell-command (format "cd %s && poetry install" name))
     (message "Starting NREPL python-server ...")
     (start-process-shell-command "nrepl-python-server"
 				 (get-buffer-create rail-test-helper-buffer)
 				 (format "cd %s && make debug" name))))
+
 (cl-defmethod rail-test-helper-launch-server ((type (eql :lein)))
   (let* ((path (or
 		(and (file-directory-p "dummy_clojure")
