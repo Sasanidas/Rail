@@ -509,15 +509,18 @@ inside a container.")
          (response (rail-send-sync-request
                     `(("op" . "completions")
                       ("ns" . ,ns)
-                      ("prefix" . ,sym)))))
-    (rail-dbind-response response (completions)
-                     (when completions
-                       (list start end
-                             (cl-loop for pcandidate in completions
-                                      collect
-                                      (string-trim
-                                       (plist-get pcandidate :candidate)))
-                             nil)))))
+                      ("prefix" . ,sym))))
+         (comp-list
+          (rail-dbind-response response (completions)
+                           (cl-loop for pcandidate in completions
+                                    for candidate =  (plist-get pcandidate :candidate)
+                                    collect
+                                    (if (string-match-p (regexp-quote sym) candidate)
+                                        candidate
+                                      (format "%s%s" sym candidate))))))
+
+    (when comp-list (list start end comp-list
+                          :exclusive 'no))))
 
 (defun rail-get-stacktrace ()
   "When error happens, print the stack trace"
