@@ -32,6 +32,7 @@
 
 (cl-defmethod rail-test-describe ((type (eql :python)))
   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (sit-for 0.5)
     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
       (should (string= "done" (car (cl-getf describe :status ))))
       (should (equal '("clone" "describe" "eval" "complete" "ls-sessions" "load-file")
@@ -40,6 +41,7 @@
 
 (cl-defmethod rail-test-describe ((type (eql :lein)))
   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (sit-for 0.5)
     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
       (should (string= "done" (car (cl-getf describe :status ))))
       (should (equal '(:clone :close
