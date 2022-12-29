@@ -64,9 +64,11 @@
 		"test/dummy_clojure")))
 
     (message "Starting NREPL lein ...")
-    (start-process-shell-command "nrepl-lein-server"
-				 (get-buffer-create rail-test-helper-buffer)
-				 (format "cd %s && lein trampoline repl :headless :host 127.0.0.1 :port 7888" path))))
+    (start-process-shell-command
+     "nrepl-lein-server"
+     (get-buffer-create rail-test-helper-buffer)
+     (format "cd %s && lein trampoline repl :headless :host 127.0.0.1 :port 7888" path))))
+
 (defun rail-test-helper-shutdown-server ()
   (ignore-errors
     (kill-process (get-buffer-process rail-test-helper-buffer))

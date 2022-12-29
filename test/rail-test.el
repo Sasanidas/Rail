@@ -49,6 +49,32 @@
 		     (delete nil
 			     (cl-getf (cddr describe) :ops)))))))
 
+(cl-defmethod rail-test-eval ((type (eql :python)))
+  (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (sit-for 0.5)
+    (let ((sum (rail-send-sync-request `(("op" . "eval")
+					 ("session" . ,(rail-current-session))
+					 ("code" . "3")
+					 ("ns" . "user"))))
+	  (cgi-name (and (rail-send-sync-request `(("op" . "eval")
+						   ("session" . ,(rail-current-session))
+						   ("code" . "import cgi")))
+			 (rail-send-sync-request `(("op" . "eval")
+						   ("session" . ,(rail-current-session))
+						   ("code" . "cgi.__name__"))))))
+
+      (should (string= "3" (cl-getf sum :value)))
+      (should (string= "cgi" (cl-getf cgi-name :value))))))
+
+(cl-defmethod rail-test-eval ((type (eql :lein)))
+  (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
+    (sit-for 0.5)
+    (let ((sum (rail-send-sync-request `(("op" . "eval")
+					 ("session" . ,(rail-current-session))
+					 ("code" . "3")
+					 ("ns" . "user")))))
+      (should (string= "3" (cl-getf sum :value ))))))
+
 (ert-deftest test-python-sync-describe ()
   (rail-test-helper-request-wrapper
    :python (rail-test-describe :python)))
@@ -56,6 +82,14 @@
 (ert-deftest test-lein-sync-describe ()
   (rail-test-helper-request-wrapper
    :lein (rail-test-describe :lein)))
+
+(ert-deftest test-python-sync-eval ()
+  (rail-test-helper-request-wrapper
+   :python (rail-test-eval :python)))
+
+(ert-deftest test-lein-sync-eval ()
+  (rail-test-helper-request-wrapper
+   :lein (rail-test-eval :lein)))
 
 
 
