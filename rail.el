@@ -156,7 +156,7 @@ The CALLBACK function will be called when reply is received."
     (process-send-string (rail-connection) (rail-bencode-encode hash))))
 
 (defun rail-send-sync-request (request)
-  "Send request to nREPL server synchronously."
+  "Send REQUEST to nREPL server synchronously."
   (let ((time0 (current-time))
         response
         global-status)
@@ -179,34 +179,37 @@ The CALLBACK function will be called when reply is received."
   (setq rail-requests-counter 0))
 
 (defun rail-current-session ()
-  "Returns current session id."
+  "Return current session id."
   (with-current-buffer (process-buffer (rail-connection)) rail-session))
 
 ;;; nrepl messages we knows about
 
 (defun rail-send-hello (callback)
-  "Initiate nREPL session."
+  "Initiate nREPL session.
+Returning the data to CALLBACK."
   (rail-send-request '(("op" ."clone")) callback))
 
 (defun rail-send-describe (callback)
-  "Produce a machine- and human-readable directory and documentation for
-the operations supported by an nREPL endpoint."
+  "Send describe operation to the current session.
+Returning the data to CALLBACK."
   (rail-send-request '(("op" . "describe")) callback))
 
 (defun rail-send-load-file (file-name file-content callback)
-  "Produce a machine- and human-readable directory and documentation for
-the operations supported by an nREPL endpoint."
+  "Send the file FILE-NAME content (FILE-CONTENT) to the current session.
+Returning the data to CALLBACK."
   (rail-send-request `(("op" . "load-file")
                    ("file" . ,file-content)
                    ("file-name" . ,file-name))
                  callback))
 
 (defun rail-send-ls-sessions (callback)
-  "Get a list of all the sessions currently running in the server."
+  "Get a list of all the sessions currently running in the server.
+Returning the data to CALLBACK."
   (rail-send-request '(("op" . "ls-sessions")) callback))
 
 (cl-defun rail-send-eval-string (str callback &optional ns)
-  "Send code for evaluation on given namespace."
+  "Send STR for evaluation on given namespace(NS).
+Returning the data to CALLBACK."
   (let ((request `(("op" . "eval")
                    ("session" . ,(rail-current-session))
                    ("code" . ,(substring-no-properties str)))))
@@ -217,7 +220,8 @@ the operations supported by an nREPL endpoint."
     (rail-send-request request callback)))
 
 (defun rail-send-stdin (str callback)
-  "Send stdin value."
+  "Send stdin(STR) value.
+Returning the data to CALLBACK."
   (rail-send-request
    `(("op" . "stdin")
      ("session" . ,(rail-current-session))
