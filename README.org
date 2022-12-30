@@ -1,3 +1,4 @@
+#+html: <p align="left"><img src="img/logo.png"  width="200"/></p>
 * Rail - Generic nREPL client for Emacs
 [[https://img.shields.io/badge/license-GPL_3-green.svg]] 
 [[https://github.com/Sasanidas/Rail/actions/workflows/main.yml/badge.svg]]
