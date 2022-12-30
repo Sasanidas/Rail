@@ -522,7 +522,13 @@ inside a container.")
                                     collect
                                     (if (string-match-p (regexp-quote sym) candidate)
                                         candidate
-                                      (format "%s%s" sym candidate))))))
+                                      (format "%s%s"
+                                              (cl-subseq sym 0
+                                                         (+ (cl-position ?. sym
+                                                                         :test #'char-equal
+                                                                         :from-end t)
+                                                            1))
+                                              candidate))))))
 
     (when comp-list (list start end comp-list
                           :exclusive 'no))))
