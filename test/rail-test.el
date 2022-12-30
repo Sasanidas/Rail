@@ -32,7 +32,6 @@
 
 (cl-defmethod rail-test-describe ((type (eql :python)))
   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
-    (sit-for 0.5)
     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
       (should (string= "done" (car (cl-getf describe :status ))))
       (should (equal '("clone" "describe" "eval" "complete" "ls-sessions" "load-file")
@@ -41,7 +40,6 @@
 
 (cl-defmethod rail-test-describe ((type (eql :lein)))
   (with-current-buffer (get-buffer-create (concat "*rail: " "localhost:7888" "*"))
-    (sit-for 0.5)
     (let ((describe (rail-send-sync-request '(("op" . "describe")))))
       (should (string= "done" (car (cl-getf describe :status ))))
       (should (equal '(:clone :close
@@ -81,29 +79,14 @@
   (rail-test-helper-request-wrapper
    :python (rail-test-describe :python)))
 
-(ert-deftest test-lein-sync-describe ()
-  (rail-test-helper-request-wrapper
-   :lein (rail-test-describe :lein)))
-
 (ert-deftest test-python-sync-eval ()
   (rail-test-helper-request-wrapper
    :python (rail-test-eval :python)))
 
-(ert-deftest test-lein-sync-eval ()
+(ert-deftest test-lein-sync-describe ()
   (rail-test-helper-request-wrapper
-   :lein (rail-test-eval :lein)))
+   :lein (rail-test-describe :lein)))
 
-
-
-
-;; (cl-getf '(:status ("done")
-;; 		   :time-stamp "2022-12-19 12:19:48.979450" :server-capabilities
-;; 		   (:ops
-;; 		    ("clone" "describe" "eval" "complete")
-;; 		    :ns
-;; 		    ("user"))
-;; 		   :id "1" "started" "2022-12-19 12:19:48.978601")
-;; 	 :status
-;; 	 )
-
-;; (equal '("clone" "describe" "eval" "complete") '("clone" "describe" "eval" "complete"))
+;; (ert-deftest test-lein-sync-eval ()
+;;   (rail-test-helper-request-wrapper
+;;    :lein (rail-test-eval :lein)))

@@ -178,9 +178,10 @@ The CALLBACK function will be called when reply is received."
   (clrhash rail-requests)
   (setq rail-requests-counter 0))
 
-(defun rail-current-session ()
-  "Return current session id."
-  (with-current-buffer (process-buffer (rail-connection)) rail-session))
+(cl-defun rail-current-session (&optional (process (rail-connection)))
+  "Return current session id.
+Optionally, it can be passes a PROCESS where the session is."
+  (with-current-buffer (process-buffer process) rail-session))
 
 ;;; nrepl messages we knows about
 

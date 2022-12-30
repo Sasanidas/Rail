@@ -29,19 +29,24 @@
 (defvar rail-test-helper-buffer "*rail-test-server*")
 
 (cl-defmacro rail-test-helper-request-wrapper (type &body body)
-  `(progn
-     (rail-test-helper-launch-server ,type)
-     (let ((count 0) (max 20))
-       (while (not (condition-case nil
-		       (rail "localhost:7888")
-		     (error nil)))
-	 (if (= count max)
-	     (error "Maximum attempt limit reached"))
-	 (sit-for 0.5)
-	 (setf count (+ count 1))))
+  `(condition-case  er
+       (progn
+	 (rail-test-helper-launch-server ,type)
+	 (let ((count 0) (max 20))
+	   (while (and (not (condition-case nil
+				(rail "localhost:7888")
+			      (error nil)))
+		       (not (rail-connection)))
 
-     ,@body
-     (rail-test-helper-shutdown-server)))
+	     (if (= count max)
+		 (error "Maximum attempt limit reached"))
+	     (sit-for 0.5)
+	     (setf count (+ count 1))))
+
+	 ,@body
+	 (rail-test-helper-shutdown-server))
+     (error (progn (rail-test-helper-shutdown-server)
+		   (signal (car er) (cdr er))))))
 
 (cl-defmethod rail-test-helper-launch-server ((type (eql :python)))
   (let* ((name "python-nrepl")
@@ -67,7 +72,7 @@
     (start-process-shell-command
      "nrepl-lein-server"
      (get-buffer-create rail-test-helper-buffer)
-     (format "cd %s && lein trampoline repl :headless :host 127.0.0.1 :port 7888" path))))
+     (format "cd %s && lein trampoline repl :headless :host localhost :port 7888" path))))
 
 (defun rail-test-helper-shutdown-server ()
   (ignore-errors
