@@ -18,7 +18,7 @@ specify, some Clojureto specific assumtions will be made (but I'll try to keep t
 ** Installation
 
 *** Manual
-Rail doesn't have any external depency, son if you are using Emacs 26.2+ you should be good to go,
+Rail doesn't have any external depency, so if you are using Emacs 26.2+ you should be good to go,
 just add the files of the project to the [[https://www.emacswiki.org/emacs/LoadPath][load-path]] and require the package:
 #+BEGIN_SRC emacs-lisp
   (require 'rail)
