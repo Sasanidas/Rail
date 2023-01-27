@@ -372,7 +372,7 @@ nested inputs."
 					   :dict-type dict-type
 					   :coding-system coding-system)
 		      responses)))
-      (delete-dups responses))))
+      responses)))
 
 (provide 'rail-bencode)
 
