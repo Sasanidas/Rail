@@ -622,8 +622,9 @@ by locatin rail-nrepl-server-project-file"
 (defun rail-interrupt ()
   "Send interrupt to all pending requests."
   (interactive)
-  (cl-loop for id being the hash-key of rail-requests
-           do (rail-send-interrupt id (rail-make-response-handler))))
+  (let ((rail-requests-snapshot (copy-hash-table rail-requests)))
+    (cl-loop for id being the hash-key of rail-requests-snapshot
+             do (rail-send-interrupt id (rail-make-response-handler)))))
 
 ;; keys for interacting with Rail REPL buffer
 (defvar rail-interaction-mode-map
