@@ -47,7 +47,7 @@ A REPL will then be pop in the side and you can start typing.
 
 
 ** Documentation
-For now, the project has no official documentation, you can check the test repository on how
+For now, the project has no official documentation, you can check the test folder on how
 the tests are been launch using the server [[https://gitlab.com/sasanidas/python-nrepl][nrepl-python]] and [[https://leiningen.org/][lein]] headless repl.
 
 
