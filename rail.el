@@ -7,7 +7,7 @@
 
 ;; Maintainer: Fermin MF
 ;; URL: https://github.com/Sasanidas/Rail
-;; Version: 0.1.0
+;; Version: 0.4.0
 ;; Keywords: languages, nrepl, lisp
 
 ;; This program is free software: you can redistribute it and/or modify
@@ -230,7 +230,8 @@ Returning the data to CALLBACK."
    callback))
 
 (defun rail-send-interrupt (request-id callback)
-  "Send interrupt for pending requests."
+  "Send interrupt for pending requests.
+It requires the REQUEST-ID and the CALLBACK."
   (rail-send-request
    `(("op" . "interrupt")
      ("session" . ,(rail-current-session))
@@ -240,7 +241,7 @@ Returning the data to CALLBACK."
 ;;; code
 
 (defun rail-make-response-handler ()
-  "Returns a function that will be called when event is received."
+  "Return a function that will be called when event is received."
   (lambda (response)
     (rail-dbind-response response (id ns value err out ex root-ex status)
                      (let ((output (concat err out
@@ -690,7 +691,7 @@ The following keys are available in `rail-interaction-mode`:
 ;;;###autoload
 (defun rail (host-and-port)
   "Load rail by setting up appropriate mode, asking user for
-connection endpoint."
+connection endpoint(HOST-AND-PORT)."
   (interactive
    (let ((host (or (rail-locate-running-nrepl-host) rail-default-host)))
      (list
