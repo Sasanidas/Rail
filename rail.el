@@ -345,7 +345,7 @@ rail-repl-buffer."
     (when dir
       (with-temp-buffer
         (insert-file-contents (concat dir ".nrepl-port"))
-        (concat "localhost:" (buffer-string))))))
+        (format "localhost:%d" (string-to-number (buffer-string)))))))
 
 (defun rail-extract-host (buff-name)
   "Take host from rail buffers."
