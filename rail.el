@@ -44,6 +44,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'rail-bencode)
+(require 'rail-log)
 
 (defgroup rail nil
   "Interaction with the nREPL Server."
@@ -98,13 +99,28 @@ e.g. clojure.stacktrace/print-stack-trace for old-style stack traces."
 (defvar rail-requests (make-hash-table :test 'equal)
   "Map of requests to be processed.")
 
+(cl-defstruct rail-request
+  op
+  callback
+  status
+  created-at
+  done-at
+  request)
+
+;; for debug
+(defun rail-debug-output-rail-requests ()
+  (maphash (lambda (k v)
+             (rail-log-debug "[rail-requests element] id: %s\top: %s\tstatus: %s\trequest: %s\n"
+                             k
+                             (rail-request-op v)
+                             (rail-request-status v)
+                             (rail-request-request v)))
+           rail-requests))
+
 (defvar rail-process nil
   "Current NREPL process.")
 
-(defvar rail-requests-counter 0
-  "Serial number for message.")
-
-(defvar rail-nrepl-sync-timeout 5
+(defvar rail-nrepl-sync-timeout 0.1
   "Number of seconds to wait for a sync response.")
 
 (defvar rail-custom-handlers (make-hash-table :test 'equal)
@@ -127,10 +143,29 @@ Defaults to: trampoline repl :headless")
 
 (defvar rail-nrepl-server-project-file "project.clj")
 
+(defvar rail-display-result-to-minibuffer-p nil)
+
+(defvar rail-message-buffer (generate-new-buffer "*rail-message-buffer*")
+  "Buffer to accumulate nREPL messages.")
 (make-variable-buffer-local 'rail-session)
 (make-variable-buffer-local 'rail-requests)
-(make-variable-buffer-local 'rail-requests-counter)
 (make-variable-buffer-local 'rail-buffer-ns)
+
+;;; for Eldoc caching
+(defcustom rail-eldoc-cache-ttl 60
+  "The time-to-live in seconds for rail-eldoc-function cache entries.
+If an entry hasn't been accessed within this time, it will be re-fetched."
+  :type 'integer
+  :group 'rail)
+
+(defvar-local rail-eldoc-cache (make-hash-table :test 'equal)
+  "Buffer-local cache for rail-eldoc-function results.
+Maps symbol to a list '(result timestamp).")
+
+(defun rail-eldoc-clear-cache ()
+  "Clear the eldoc cache for the current buffer."
+  (interactive)
+  (clrhash rail-eldoc-cache))
 
 ;;; message stuff
 
@@ -146,37 +181,71 @@ Bind the value of the provided KEYS and execute BODY."
 (defun rail-send-request (request callback)
   "Send REQUEST and assign CALLBACK.
 The CALLBACK function will be called when reply is received."
-  (let* ((id       (number-to-string (cl-incf rail-requests-counter)))
-         (hash (make-hash-table :test 'equal)))
-    (puthash "id" id hash)
-    (cl-loop for (key . value) in request
-             do (puthash key value hash))
+  (rail-log-debug "request: %s" request)
+  (cl-flet ((rail-current-timestamp ()
+              (floor (* 1000000 (float-time (current-time))))))
+    (let* ((created-at (rail-current-timestamp))
+           (id (number-to-string created-at))
+           (request-body (make-hash-table :test 'equal))
+           (op-str (cdr (assoc "op" request)))
+           (op (and op-str (intern (concat ":" op-str))))
+           (req (make-rail-request :op op
+                                   :callback callback
+                                   :status :submit
+                                   :created-at created-at
+                                   :request request)))
+      ;; construct request-body hash
+      (puthash "id" id request-body)
+      (cl-loop for (key . value) in request
+               do (puthash key value request-body))
 
-    (puthash id callback rail-requests)
-    (process-send-string (rail-connection) (rail-bencode-encode hash))))
+      ;; save request struct to rail-requests hash
+      (puthash id req rail-requests)
+      (condition-case err
+          (prog1 id
+            (process-send-string (rail-connection) (rail-bencode-encode request-body))
+            (setf (rail-request-status req) :waiting))
+        (error
+         (setf (rail-request-status req) :error)
+         (error "Sync nREPL request error: %s" err))))))
+
+(defvar rail-sync-request-response)
 
 (defun rail-send-sync-request (request)
   "Send REQUEST to nREPL server synchronously."
+  (setq rail-sync-request-response nil)
   (let ((time0 (current-time))
-        response
         global-status)
-    (rail-send-request request (lambda (resp) (setq response resp)))
-    (while (not (member "done" global-status))
-      (rail-dbind-response response (status)
-        (setq global-status status))
-      (when (time-less-p rail-nrepl-sync-timeout
-                         (time-subtract nil time0))
-        (error "Sync nREPL request timed out %s" request))
-      (accept-process-output nil 0.01))
-    (rail-dbind-response response (id status)
-      (when id
-        (remhash id rail-requests)))
-    response))
+    (let ((request-id (rail-send-request request
+                                         (lambda (res)
+                                           (rail-log-debug "res: %s" res)
+                                           (setq rail-sync-request-response res)))))
+      (while (not (member "done" global-status))
+        (rail-dbind-response
+         rail-sync-request-response (status)
+         (setq global-status status))
+
+        (rail-log-debug "rail-sync-request-response: %s" rail-sync-request-response)
+        (rail-log-debug "global-status: %s" global-status)
+
+        (when (time-less-p rail-nrepl-sync-timeout
+                           (time-subtract nil time0))
+          (remhash request-id rail-requests)
+          (error "Sync nREPL request timed out %s" request))
+        (accept-process-output nil 0.01))
+
+      (rail-dbind-response
+       rail-sync-request-response
+       (id status)
+       (when id
+         (unless (equal request-id id)
+           (error "Request id mismatch"))
+         (remhash id rail-requests)))
+      rail-sync-request-response)))
 
 (defun rail-clear-request-table ()
   "Erases current request table."
-  (clrhash rail-requests)
-  (setq rail-requests-counter 0))
+  (clrhash rail-requests))
 
 (cl-defun rail-current-session (&optional (process (rail-connection)))
   "Return current session id.
@@ -208,17 +277,27 @@ Returning the data to CALLBACK."
 Returning the data to CALLBACK."
   (rail-send-request '(("op" . "ls-sessions")) callback))
 
+(defun rail-submitted-request-exist-p ()
+  (cl-loop for id being the hash-keys of rail-requests
+           for req = (gethash id rail-requests)
+           if (eq (rail-request-op req) :eval)
+           return t))
+
 (cl-defun rail-send-eval-string (str callback &optional ns)
   "Send STR for evaluation on given namespace(NS).
 Returning the data to CALLBACK."
-  (let ((request `(("op" . "eval")
-                   ("session" . ,(rail-current-session))
-                   ("code" . ,(substring-no-properties str)))))
-    (when ns
-      (setf request (append request
-                            `(("ns" . ,ns)))))
 
-    (rail-send-request request callback)))
+  (if (rail-submitted-request-exist-p)
+      ;; TODO: Should it be queued and processed asynchronously?
+      (message "Waiting other eval result. The request was not sent. code: \n%s" str)
+    (let ((request `(("op" . "eval")
+                     ("session" . ,(rail-current-session))
+                     ("code" . ,(substring-no-properties str)))))
+      (when ns
+        (setf request (append request
+                              `(("ns" . ,ns)))))
+
+      (rail-send-request request callback))))
 
 (defun rail-send-stdin (str callback)
   "Send stdin(STR) value.
@@ -240,42 +319,49 @@ It requires the REQUEST-ID and the CALLBACK."
 
 ;;; code
 
-(defun rail-make-response-handler ()
+(defun rail-eval-response-handler ()
   "Return a function that will be called when event is received."
   (lambda (response)
-    (rail-dbind-response response (id ns value err out ex root-ex status)
-                     (let ((output (concat err out
-                                           (if value
-                                               (concat value "\n"))))
-                           (process (get-buffer-process (rail-repl-buffer))))
-                       ;; update namespace if needed
-                       (if ns (setq rail-buffer-ns ns))
-                       (comint-output-filter process output)
-                       ;; now handle status
-                       (when status
-                         (when (and rail-detail-stacktraces (member "eval-error" status))
-                           (rail-get-stacktrace))
-                         (when (member "eval-error" status)
-                           (message root-ex))
-                         (when (member "interrupted" status)
-                           (message "Evaluation interrupted."))
-                         (when (member "need-input" status)
-                           (rail-handle-input))
-                         (when (member "done" status)
-                           (remhash id rail-requests)))
-                       ;; show prompt only when no messages are pending
-                       (when (hash-table-empty-p rail-requests)
-                         (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
+    (rail-log-debug "response: %s" response)
+    (rail-dbind-response
+     response (id ns value err out ex root-ex status)
+     (let ((output (concat err out
+                           (if value
+                               (concat value "\n"))))
+           (process (get-buffer-process (rail-repl-buffer))))
+       ;; update namespace if needed
+       (if ns (setq rail-buffer-ns ns))
+       ;; show response value to modeline only when rail-interaction-mode
+       (when rail-display-result-to-minibuffer-p
+         (message value)
+         (setq rail-display-result-to-minibuffer-p nil))
+       (comint-output-filter process output)
+       ;; now handle status
+       (when status
+         (when (and rail-detail-stacktraces (member "eval-error" status))
+           (rail-get-stacktrace))
+         (when (member "eval-error" status)
+           (message root-ex))
+         (when (member "need-input" status)
+           (rail-handle-input))
+         (when (member "done" status)
+           (cl-loop for (key value) on response by #'cddr
+                    when (eq key :id)
+                    do (remhash value rail-requests))))
+       ;; show prompt only when no messages are pending
+       (when (hash-table-empty-p rail-requests)
+         (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
 
 (defun rail-input-sender (proc input &optional ns)
   "Called when user enter data in REPL and when something is received in."
-  (rail-send-eval-string input (rail-make-response-handler) ns))
+  (unless (equal input "")
+    (rail-send-eval-string input (rail-eval-response-handler) ns)))
 
 (defun rail-handle-input ()
   "Called when requested user input."
   (rail-send-stdin
    (concat (read-from-minibuffer "Stdin: ") "\n")
-   (rail-make-response-handler)))
+   (rail-eval-response-handler)))
 
 (defun rail-sentinel (process message)
   "Called when connection is changed; in out case dropped."
@@ -285,50 +371,84 @@ It requires the REQUEST-ID and the CALLBACK."
 
 (defun rail-dispatch (msg)
   "Find associated callback for a message by id or by op."
-  (rail-dbind-response msg (id op)
-    (let ((callback (or (gethash id rail-requests)
-                        (gethash op rail-custom-handlers))))
-      (when callback
-        (funcall callback msg)))))
+  (rail-dbind-response
+   msg (id op)
+   (let ((callback (or (when-let* ((req (gethash id rail-requests)))
+                         (rail-request-callback req))
+                       (gethash op rail-custom-handlers))))
+     (when callback
+       (funcall callback msg)))))
 
-(defun rail-net-decode ()
-  "Decode the data in the current buffer and remove the processed data from the
-buffer if the decode successful."
-  (let* ((start   (point-min))
-         (end     (point-max))
-         (data    (buffer-substring-no-properties
-                   start end))
-         (decoded (rail-bencode-decode data)))
-    (delete-region start end)
-    decoded))
+(defun rail-ensure-message-buffer ()
+  "Ensure rail-message-buffer exists and is alive.
+If the buffer does not exist or is killed, recreate it."
+  (unless (and (bufferp rail-message-buffer)
+               (buffer-live-p rail-message-buffer))
+    (setq rail-message-buffer (generate-new-buffer "*rail-message-buffer*"))))
 
 (defun rail-net-filter (process string)
   "Called when the new message is received. Process will redirect
 all received output to this function; it will decode it and put in
 rail-repl-buffer."
-  (with-current-buffer (process-buffer process)
+  (rail-ensure-message-buffer)
+  (with-current-buffer rail-message-buffer
     (goto-char (point-max))
-    (insert string)
-    ;; Stolen from Cider. Assure we have end of the message so decoding can work;
-    ;; to make sure we are at the real end (session id can contain 'e' character), we call
-    ;; 'accept-process-output' once more.
-    ;;
-    ;; This 'ignore-errors' is a hard hack here since 'accept-process-output' will call filter
-    ;; which will be this function causing Emacs to hit max stack size limit.
-    (ignore-errors
-      (when (eq ?e (aref string (- (length string) 1)))
-        (unless (accept-process-output process 0.01)
-          (while (> (buffer-size) 1)
-            (rail-dispatch (rail-net-decode))))))))
+    (insert string))
+  (rail-process-messages))
+
+(defun rail-read-from-message-buffer ()
+  "Check if the message buffer contains at least one complete bencoded message.
+Returns a cons of (RESPONSES . LAST-POS), where LAST-POS is the position up to
+which the buffer contains completely decoded data. RESPONSES is a list of
+decoded objects in the order they appeared."
+  (rail-ensure-message-buffer)
+  (condition-case err
+      (with-current-buffer rail-message-buffer
+        (goto-char (point-min))
+        (let ((responses '())
+              (last-pos (point-min)))
+          (while (< (point) (point-max))
+            (let ((current-point (point)))
+              (let ((result (rail-bencode-decode-from-buffer)))
+                (push result responses)
+                (setq last-pos (point))
+                (when (= current-point (point))
+                  (rail-log-error "Bencode decode loop detected: point did not advance at %d. Buffer content near point: %s"
+                                  current-point
+                                  (buffer-substring (max (point-min) (- current-point 10))
+                                                    (min (point-max) (+ current-point 10))))
+                  (signal 'rail-bencode-decode-loop "Point did not advance during decode loop")))))
+          (cons (nreverse responses) last-pos)))
+    ;; If the input is incomplete, catch an error and return nil
+    (rail-bencode-end-of-file nil)
+    ;; other error
+    (error
+     (rail-log-error "Error during bencode decode in rail-read-from-message-buffer: %S" err)
+     nil)))
+
+(defun rail-process-messages ()
+  "Process complete nREPL messages from the message buffer."
+  (let ((result (rail-read-from-message-buffer)))
+    (when result
+      (let ((responses (car result))
+            (last-pos (cdr result)))
+        (unwind-protect
+            (dolist (response responses)
+              (rail-log-debug "Dispatching individual response: %S" response)
+              (rail-dispatch response))
+          (with-current-buffer rail-message-buffer
+            (delete-region (point-min) last-pos)))))))
 
 (defun rail-new-session-handler (process)
   "Returns callback that is called when new connection is established."
   (lambda (response)
-    (rail-dbind-response response (id new-session)
-                     (when new-session
-                       (message "Connected.")
-                       (setq rail-session new-session)
-                       (remhash id rail-requests)))))
+    (rail-dbind-response
+     response (id new-session)
+     (when new-session
+       (message "Connected. new-session: %S, (rail-connection): %S" new-session (rail-connection))
+       (with-current-buffer (process-buffer process)
+         (setq rail-session new-session))
+       (remhash id rail-requests)))))
 
 (defun rail-valid-host-string (str default)
   "Used for getting valid string for host/port part."
@@ -356,14 +476,18 @@ rail-repl-buffer."
   (or (get-buffer (format "*rail: %s*" (rail-locate-running-nrepl-host)))
       (get-buffer
        (format "*rail: %s*"
-               (rail-extract-host (buffer-name (current-buffer)))))))
+               (rail-extract-host (buffer-name (current-buffer)))))
+      (get-buffer
+       (format "*rail: %s*"
+               (substring (process-name (rail-connection)) 5)))))
 
 (defun rail-connection ()
   "Returns right rail connection."
   (or (get-process (concat "rail/" (rail-locate-running-nrepl-host)))
       (get-process
        (concat "rail/"
-               (rail-extract-host (buffer-name (current-buffer)))))))
+               (rail-extract-host (buffer-name (current-buffer)))))
+      rail-process))
 
 (defun rail-strip-protocol (host)
   "Check if protocol was given and strip it."
@@ -382,9 +506,6 @@ rail-repl-buffer."
              (cons host (string-to-number port))))
     (error nil)))
 
-
-;;(when (get-buffer name) (rail-disconnect))
-
 (cl-defun rail-connect (&key (host-and-port rail-default-host))
   "Connect to remote endpoint using provided hostname and port."
   (let* ((name (concat "*rail-connection: " host-and-port "*"))
@@ -395,11 +516,10 @@ rail-repl-buffer."
           (message "Connecting to nREPL host on '%s:%d'..." host port)
           (setf process (open-network-stream
                          (concat "rail/" host-and-port) name host port))
-
           (set-process-filter process 'rail-net-filter)
           (set-process-sentinel process 'rail-sentinel)
           (set-process-coding-system process 'utf-8-unix 'utf-8-unix)
-
+          (rail-clear-request-table)
           (rail-send-hello (rail-new-session-handler (process-buffer process)))
           process)
       (error "Connection with %s not possible" host-and-port))))
@@ -449,6 +569,13 @@ will force connection closing, which will as result call '(rail-sentinel)'."
       (backward-sexp)
       (rail-eval-region (point) end))))
 
+(defun rail-eval-expression-at-point-and-display-result ()
+  "Figure out expression at point and send it for evaluation."
+  (interactive)
+  (setq rail-display-result-to-minibuffer-p t)
+  (comint-output-filter (get-buffer-process (rail-repl-buffer)) "\n")
+  (rail-eval-expression-at-point))
+
 (defun rail-eval-namespace ()
   "Tries to evaluate Clojure ns form. It does this by matching first
 expression at the beginning of the file and evaluating it. Not something
@@ -474,7 +601,9 @@ inside a container.")
 (defun rail-jump-find-file (file)
   "Internal function to find a file on the disk or inside a jar."
   (if (not (string-match "^jar:file:\\(.+\\)!\\(.+\\)" file))
-      (find-file (substring file 5))
+      (if (string-match "^file:\\(.+\\)" file)
+          (find-file (substring file 5))
+        (find-file file))
     (let* ((jar (match-string 1 file))
            (clj (match-string 2 file))
            (already-open (get-buffer (file-name-nondirectory jar))))
@@ -492,54 +621,59 @@ inside a container.")
   (rail-send-request
    `(("op" . "lookup")
      ("sym" . ,(substring-no-properties var))
-     ("ns" . ,ns))
+     ,@(and ns `(("ns" . ,ns))))
    (lambda (response)
-     (rail-dbind-response response (id info status)
-                      (when (member "done" status)
-                        (remhash id rail-requests))
-                      (when info
-                        (rail-dbind-response info (file line)
-                                         (rail-jump-find-file (funcall rail-translate-path-function file))
-                                         (when line
-                                           (goto-char (point-min))
-                                           (forward-line (1- line)))))))))
+     (rail-log-debug "lookup response: %s" response)
+     (rail-dbind-response
+      response (id info status)
+      (when (member "done" status)
+        (remhash id rail-requests))
+      (when info
+        (rail-dbind-response
+         info (file line)
+         (let ((path (funcall rail-translate-path-function file)))
+           (rail-log-debug "lookup path: %s" path)
+           (rail-jump-find-file path)
+           (when line
+             (goto-char (point-min))
+             (forward-line (1- line))))))))))
 
 (defun rail-completion-at-point ()
   "Function to be used for the hook `completion-at-point-functions'."
   (interactive)
-  (let* ((bnds (bounds-of-thing-at-point 'symbol))
-         (start (car bnds))
-         (end (cdr bnds))
-         (ns (or (rail-get-clojure-ns) rail-buffer-ns))
-         (sym (or (thing-at-point 'symbol t) ""))
-         (response (rail-send-sync-request
-                    `(("op" . "completions")
-                      ("ns" . ,ns)
-                      ("prefix" . ,sym))))
-         (comp-list
-          (rail-dbind-response response (completions)
-                           (cl-loop for pcandidate in completions
-                                    for candidate =  (plist-get pcandidate :candidate)
-                                    collect
-                                    (if (string-match-p (regexp-quote sym) candidate)
-                                        candidate
-                                      (format "%s%s"
-                                              (cl-subseq sym 0
-                                                         (+ (cl-position ?. sym
-                                                                         :test #'char-equal
-                                                                         :from-end t)
-                                                            1))
-                                              candidate))))))
-
-    (when comp-list (list start end comp-list
-                          :exclusive 'no))))
+  (when-let ((sym (thing-at-point 'symbol t)))
+    (let* ((bnds (bounds-of-thing-at-point 'symbol))
+           (start (car bnds))
+           (end (cdr bnds))
+           (ns (or (rail-get-clojure-ns) rail-buffer-ns))
+           (response (when (hash-table-empty-p rail-requests)
+                       (rail-send-sync-request
+                        `(("op" . "completions")
+                          ("ns" . ,ns)
+                          ("prefix" . ,sym)))))
+           (comp-list
+            (rail-dbind-response
+             response (completions)
+             (cl-loop for pcandidate in completions
+                      for candidate =  (plist-get pcandidate :candidate)
+                      collect
+                      (if (string-match-p (regexp-quote sym) candidate)
+                          candidate
+                        (format "%s%s"
+                                (cl-subseq sym 0
+                                           (+ (cl-position ?. sym
+                                                           :test #'char-equal
+                                                           :from-end t)
+                                              1))
+                                candidate))))))
+      (when comp-list (list start end comp-list :exclusive 'no)))))
 
 (defun rail-get-stacktrace ()
   "When error happens, print the stack trace"
   (let ((pst rail-print-stack-trace-function))
     (rail-send-eval-string
      (format "(do (require (symbol (namespace '%s))) (%s *e))" pst pst)
-     (rail-make-response-handler))))
+     (rail-eval-response-handler))))
 
 (defun rail-get-clojure-ns ()
   "If available, get the correct clojure namespace."
@@ -565,7 +699,7 @@ inside a container.")
   (rail-eval-doc symbol))
 
 (defun rail-load-file (path)
-  ""
+  "Load the content of file PATH into the connected nREPL server."
   (interactive "f")
   (let* ((buffer (find-file-noselect path))
          (file-content (with-current-buffer buffer
@@ -575,11 +709,12 @@ inside a container.")
      (buffer-file-name buffer)
      file-content
      (lambda (response)
-       (rail-dbind-response response (id ex root-ex status)
-                        (let ((process (get-buffer-process (rail-repl-buffer))))
-                          ;; now handle status
-                          (when (member "done" status)
-                            (remhash id rail-requests))))
+       (rail-dbind-response
+        response (id ex root-ex status)
+        (let ((process (get-buffer-process (rail-repl-buffer))))
+          ;; now handle status
+          (when (member "done" status)
+            (remhash id rail-requests))))
        (message "File loaded!")))))
 
 (defun rail-jump (var)
@@ -602,6 +737,69 @@ inside a container.")
     (switch-to-buffer (marker-buffer marker))
     (goto-char (marker-position marker))))
 
+;;; for Eldoc
+
+(defun rail-eldoc-function ()
+  "Provide Eldoc support (without string/comment check)."
+  (cl-flet ((cache-expired-p (timestamp-float)
+              (> (- (float-time) timestamp-float)
+                 rail-eldoc-cache-ttl)))
+    (save-excursion
+      (condition-case err
+          (progn
+            (backward-up-list 1)
+            (forward-char 1)
+            (skip-chars-forward " \t\n")
+            (let* ((start (point))
+                   (sym (progn
+                          (forward-sexp 1)
+                          (buffer-substring-no-properties start (point)))))
+              (when (and sym (not (string-empty-p sym)))
+                (let* ((now (float-time))
+                       (cached-data (gethash sym rail-eldoc-cache)))
+                  (cond
+                   ;; Cache hit and not expired
+                   ((and cached-data (not (cache-expired-p (cadr cached-data))))
+                    (let ((result (car cached-data)))
+                      ;; Update timestamp (sliding window)
+                      (puthash sym (list result now) rail-eldoc-cache)
+                      ;; Return cached result
+                      result))
+                   (t ; Cache miss or expired, send request
+                    (let* ((response (when (hash-table-empty-p rail-requests)
+                                       (rail-send-sync-request `(("op" . "lookup") ("sym" . ,sym)))))
+                           (result ; Process response and format it, or return nil
+                            (when response
+                              (rail-dbind-response
+                               response (id info status)
+                               (when (member "done" status)
+                                 (remhash id rail-requests))
+                               (when info
+                                 (rail-dbind-response
+                                  info (arglists-str doc)
+                                  (when (or arglists-str doc)
+                                    (format "%s%s%s"
+                                            (if arglists-str (format "%s: %s" sym arglists-str) sym)
+                                            (if (and arglists-str doc) "\n" "")
+                                            (if doc doc "")))))))))
+                      (rail-log-debug "lookup response for %s: %s" sym response)
+                      ;; Cache the new result with current timestamp
+                      (puthash sym (list result now) rail-eldoc-cache)
+                      ;; Return the new result
+                      result)))))))
+        (error
+         ;; Return nil on any error
+         (rail-log-debug "rail-eldoc-function: Not in S-exp: %S" err)
+         nil)))))
+
+(defun rail-setup-eldoc ()
+  "Set up Eldoc support for the current buffer using `rail-eldoc-function`."
+  (interactive)
+  (setq-local eldoc-documentation-function #'rail-eldoc-function)
+  (eldoc-mode 1))
+
+;;; REPL
+
 (defun rail-switch-to-repl ()
   (interactive)
   (pop-to-buffer (rail-repl-buffer)))
@@ -620,18 +818,47 @@ by locatin rail-nrepl-server-project-file"
         (async-shell-command (concat rail-nrepl-server-cmd " " rail-nrepl-server-cmd-args)
                              nrepl-buf-name)))))
 
+(defun rail-interrupt-response-handler ()
+  "Return a function that will be called when event is received."
+  (lambda (response)
+    (rail-log-debug "interrupt response: %s" response)
+    (rail-dbind-response
+     response (id status)
+     (unwind-protect
+         (if (member "done" status)
+             (message "Evaluation interrupted.")
+           (message "Evaluation interrupt failed."))
+       (let ((process (get-buffer-process (rail-repl-buffer))))
+         ;; Removing the interrupt request from rail-requests.
+         ;; The interrupted eval request is removed from rail-requests by rail-eval-response-handler
+         ;; because it should have done with a (done interrupted) status.
+         (remhash id rail-requests)
+         (comint-output-filter process (format rail-repl-prompt-format rail-buffer-ns)))))))
+
 (defun rail-interrupt ()
   "Send interrupt to all pending requests."
   (interactive)
+  ;; Ensure that no operations other than eval are in progress
+  (cl-loop for id being the hash-key of rail-requests
+           for req = (gethash id rail-requests)
+           if (not (member (rail-request-op req) '(:eval :interrupt)))
+           do (error "Cannot execute interrupt because a request other than eval is being processed."))
+  ;; Erase rail-message-buffer contents to ensure interrupt success
+  (with-current-buffer rail-message-buffer
+    (erase-buffer))
+  ;; Send interrupt request to all eval requests registered in rail-requests
   (cl-loop with rail-requests-snapshot = (copy-hash-table rail-requests)
            for id being the hash-key of rail-requests-snapshot
-           do (rail-send-interrupt id (rail-make-response-handler))))
+           for req = (gethash id rail-requests)
+           if (eq (rail-request-op req) :eval)
+           do (rail-send-interrupt id (rail-interrupt-response-handler))))
 
 ;; keys for interacting with Rail REPL buffer
 (defvar rail-interaction-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map "\C-c\C-c" 'rail-eval-defun)
     (define-key map "\C-c\C-e" 'rail-eval-expression-at-point)
+    (define-key map "\C-x\C-e" 'rail-eval-expression-at-point-and-display-result)
     (define-key map "\C-c\C-r" 'rail-eval-region)
     (define-key map "\C-c\C-k" 'rail-eval-buffer)
     (define-key map "\C-c\C-n" 'rail-eval-namespace)
@@ -641,6 +868,7 @@ by locatin rail-nrepl-server-project-file"
     (define-key map "\M-."     'rail-jump)
     (define-key map "\M-,"     'rail-jump-pop)
     (define-key map "\C-c\C-z" 'rail-switch-to-repl)
+    (define-key map (kbd "C-M-i") #'completion-at-point)
     map))
 
 ;; keys for interacting inside Rail REPL buffer
@@ -650,6 +878,7 @@ by locatin rail-nrepl-server-project-file"
     (define-key map "\C-c\C-d" 'rail-describe)
     (define-key map "\C-c\C-c" 'rail-interrupt)
     (define-key map "\M-."     'rail-jump)
+    (define-key map (kbd "TAB") #'completion-at-point)
     map))
 
 ;;; rest
@@ -686,7 +915,9 @@ The following keys are available in `rail-interaction-mode`:
 
   \\{rail-interaction-mode}"
 
-  :init-value nil :lighter " Rail" :keymap rail-interaction-mode-map)
+  :init-value nil :lighter " Rail" :keymap rail-interaction-mode-map
+
+  (add-hook 'completion-at-point-functions #'rail-completion-at-point nil t))
 
 ;;;###autoload
 (defun rail (host-and-port)

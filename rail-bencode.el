@@ -213,6 +213,15 @@ nested data structures."
             (signal 'rail-bencode-overflow (cons string result))
           result)))))
 
+(cl-defun rail-bencode--substring-bytes (str bytes &optional (coding-system 'utf-8))
+  "Obtains a substring from STR to BYTES."
+  (let* (;; Encode strings into byte strings
+         (byte-str (encode-coding-string str coding-system))
+         ;; Obtain a specified range of byte strings
+         (sub-byte-str (substring byte-str 0 bytes)))
+    ;; Decode byte strings to character strings
+    (decode-coding-string sub-byte-str coding-system :nocopy)))
+
 (defsubst rail-bencode--decode-string (coding-system)
   "Decode a string from the current buffer at point.
 
@@ -241,10 +250,10 @@ Returns cons of (raw . decoded)."
                   (cons length-string length)))
         (when (> (+ (point) length) (point-max))
           (signal 'rail-bencode-end-of-file (+ (point) length)))
-        (let ((string (buffer-substring (point) (+ (point) length))))
-          (prog1 (cons string
-                       (decode-coding-string string coding-system :nocopy))
-            (forward-char length)))))))
+        (let* ((string (buffer-substring (point) (+ (point) length)))
+               (decoded-string (rail-bencode--substring-bytes string length coding-system)))
+          (prog1 (cons string decoded-string)
+            (forward-char (length decoded-string))))))))
 
 (defsubst rail-bencode--to-plist (list)
   "Convert a series of parsed dictionary entries into a plist."
