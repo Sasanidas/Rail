@@ -50,7 +50,7 @@ A REPL will then be pop on the side and you can start typing.
 
 ** Documentation
 For now, this project has no official documentation, you can check the test
-folder on how the tests are being launched using the server [[https://gitlab.com/sasanidas/python-nrepl][nrepl-python]] and
+folder on how the tests are being launched using the server [[https://codeberg.org/sasanidas/nrepl-python.git][nrepl-python]] and
 [[https://leiningen.org/][lein]] headless repl.
 
 
